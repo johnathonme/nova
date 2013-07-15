@@ -101,4 +101,32 @@ class Failure(Exception):
 
 
 class CloudcontrolapiDriver(driver.ComputeDriver):
-    """The ESX host connection object."""
+    """The Cloudontrol host connection object."""
+
+    def __init__(self, virtapi, read_only=False, scheme="https"):
+        super(CloudcontrolapiDriver, self).__init__(virtapi)
+        self._cluster_name = CONF.ddcloudapi_cluster_name
+        if not self._cluster_name:
+            self._cluster = None
+        else:
+            self._cluster = vm_util.get_cluster_ref_from_name(
+                            self._session, self._cluster_name)
+            if self._cluster is None:
+                raise exception.NotFound(_("Cloudcontrol Cluster %s is not found")
+                                           % self._cluster_name)
+
+        """self._volumeops = volumeops.VMwareVolumeOps(self._session,
+                                                    self._cluster)
+        self._vmops = vmops.VMwareVMOps(self._session, self.virtapi,
+                                        self._volumeops, self._cluster)
+                                        """
+        self._vc_state = None
+
+
+    @property
+    def host_state(self):
+        if not self._vc_state:
+            self._vc_state = host.VCState(self._session,
+                                          self._host_ip,
+                                          self._cluster)
+        return self._vc_state
