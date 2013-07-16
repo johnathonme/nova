@@ -159,6 +159,10 @@ def get_dynamic_property(vim, mobj, type, property_name):
 
 def get_objects(vim, type, properties_to_collect=None, all=False):
     """Gets the list of objects of the type specified."""
+
+    print("VIM and TYPE:   %s    %s"  %(vim, type))
+
+
     if not properties_to_collect:
         properties_to_collect = ["name"]
 

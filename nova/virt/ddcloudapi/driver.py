@@ -31,6 +31,7 @@ from nova.virt import driver
 
 from nova.virt.ddcloudapi import vm_util
 from nova.virt.ddcloudapi import vim
+from nova.virt.ddcloudapi import error_util
 
 
 LOG = logging.getLogger(__name__)
@@ -495,12 +496,16 @@ class VMwareAPISession(object):
         return vim.Vim(protocol=self._scheme, host=self._host_ip)
 
     def _create_session(self):
+
+        print ("CREATE SESSION")
         """Creates a session with the ESX host."""
         while True:
             try:
                 # Login and setup the session with the ESX host for making
                 # API calls
                 self.vim = self._get_vim_object()
+                print ("GOT VIM OBJECT")
+                return
                 session = self.vim.Login(
                                self.vim.get_service_content().sessionManager,
                                userName=self._host_username,

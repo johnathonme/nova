@@ -29,7 +29,7 @@ except ImportError:
 
 from oslo.config import cfg
 
-from nova.virt.vmwareapi import error_util
+from nova.virt.ddcloudapi import error_util
 
 RESP_NOT_XML_ERROR = 'Response is "text/html", not "text/xml"'
 CONN_ABORT_ERROR = 'Software caused connection abort'
@@ -43,6 +43,63 @@ vmwareapi_wsdl_loc_opt = cfg.StrOpt('vmwareapi_wsdl_loc',
 
 CONF = cfg.CONF
 CONF.register_opt(vmwareapi_wsdl_loc_opt)
+
+ddcloudapi_opts = [
+    cfg.StrOpt('ddcloudapi_host_ip',
+               default=None,
+               help='URL for connection to CloudControl API host. Required if '
+                    'compute_driver is ddcloudapi.CloudcontrolESXDriver or '
+                    'ddcloudapi.CloudcontrolVCDriver.'),
+    cfg.StrOpt('ddcloudapi_host_username',
+               default=None,
+               help='Username for connection to Cloudcontrol host. '
+                    'Used only if compute_driver is '
+                    'ddcloudapi.CloudcontrolESXDriver or ddcloudapi.CloudcontrolVCDriver.'),
+    cfg.StrOpt('ddcloudapi_host_password',
+               default=None,
+               help='Password for connection to Cloudcontrol host. '
+                    'Used only if compute_driver is '
+                    'ddcloudapi.CloudcontrolESXDriver or ddcloudapi.CloudcontrolVCDriver.',
+               secret=True),
+    cfg.StrOpt('ddcloudapi_url',
+               default=None,
+               help='Name of a Cloudcontrol API url. '
+                    'Used only if compute_driver is '
+                    'ddcloudapi.CloudcontrolVCDriver.'),
+    cfg.StrOpt('ddcloudapi_cluster_name',
+               default=None,
+               help='Name of a Cloudcontrol Cluster ComputeResource. '
+                    'Used only if compute_driver is '
+                    'ddcloudapi.CloudcontrolVCDriver.'),
+    cfg.FloatOpt('ddcloudapi_task_poll_interval',
+                 default=5.0,
+                 help='The interval used for polling of remote tasks. '
+                       'Used only if compute_driver is '
+                       'ddcloudapi.CloudcontrolESXDriver or '
+                       'ddcloudapi.CloudcontrolVCDriver.'),
+    cfg.IntOpt('ddcloudapi_api_retry_count',
+               default=10,
+               help='The number of times we retry on failures, e.g., '
+                    'socket error, etc. '
+                    'Used only if compute_driver is '
+                    'ddcloudapi.CloudcontrolESXDriver or ddcloudapi.CloudcontrolVCDriver.'),
+    cfg.IntOpt('vnc_port',
+               default=5900,
+               help='VNC starting port'),
+    cfg.IntOpt('vnc_port_total',
+               default=10000,
+               help='Total number of VNC ports'),
+    cfg.StrOpt('vnc_password',
+               default=None,
+               help='VNC password',
+               secret=True),
+    cfg.BoolOpt('use_linked_clone',
+                default=True,
+                help='Whether to use linked clone'),
+    ]
+
+#CONF = cfg.CONF
+CONF.register_opts(ddcloudapi_opts)
 
 
 if suds:
@@ -73,10 +130,13 @@ class Vim:
     def __init__(self,
                  protocol="https",
                  host="localhost"):
+
         """
         Creates the necessary Communication interfaces and gets the
         ServiceContent for initiating SOAP transactions.
 
+        :param protocol:
+        :param host:
         protocol: http or https
         host    : ESX IPAddress[:port] or ESX Hostname[:port]
         """
@@ -86,14 +146,155 @@ class Vim:
         self._protocol = protocol
         self._host_name = host
         self.wsdl_url = Vim.get_wsdl_url(protocol, host)
+        self.servers_url = Vim.get_servers_url(protocol, host)
         self.url = Vim.get_soap_url(protocol, host)
-        self.client = suds.client.Client(self.wsdl_url, location=self.url,
-                                         plugins=[VIMMessagePlugin()])
-        self._service_content = self.RetrieveServiceContent(
-                                        "ServiceInstance")
+        self.url = Vim.get_servers_url(protocol, host)
+        print ("CONNECTING>>>>>>>")
+
+        import urllib2
+
+
+
+	host_ip = CONF.ddcloudapi_host_ip
+        host_username = CONF.ddcloudapi_host_username
+        host_password = CONF.ddcloudapi_host_password
+	host_url = CONF.ddcloudapi_url
+
+        """
+        password_manager = urllib2.HTTPPasswordMgrWithDefaultRealm()
+        password_manager.add_password(
+            None, 'https://api-ap.dimensiondata.com/', delicious_user, delicious_pass
+        )
+        auth_handler = urllib2.HTTPBasicAuthHandler(password_manager)
+        opener = urllib2.build_opener(auth_handler)
+        urllib2.install_opener(opener)
+        respxml = urllib2.urlopen('https://api-ap.dimensiondata.com/oec/0.9/myaccount').read()
+
+        print ("respxml:  %s" % respxml)
+
+        respxml = urllib2.urlopen('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?').read()
+
+        print ("respxml2:  %s" % respxml)
+
+        #self.client = suds.client.Client(self.servers_url, location=self.url,
+        #                                 plugins=[VIMMessagePlugin()])
+        #self._service_content = self.RetrieveServiceContent(
+        #                                "ServiceInstance")
+        self.client = opener
+        """
+
+        """
+        import httplib2
+        http = httplib2.Http('.cache')
+        response, content = http.request('http://developer.yahoo.com/')
+        print("YAHOOOOOOO")
+        """
+
+        import httplib2
+        http = httplib2.Http('.cache')
+        http.add_credentials(host_username, host_password)
+        response, content = http.request(host_url)
+        print("response: %s" % response)
+        print("content:  %s" % content)
+
+        from xml.etree import ElementTree
+        doc = ElementTree.fromstring(content)
+
+        try:
+            import xml.etree.cElementTree as ET
+        except ImportError:
+            import xml.etree.ElementTree as ET
+
+        ET.register_namespace('', 'http://oec.api.opsource.net/schemas/server')
+        ET.register_namespace('', 'http://oec.api.opsource.net/schemas/directory')
+        ET.register_namespace('', 'http://oec.api.opsource.net/schemas/organization')
+        ET.register_namespace('', 'http://oec.api.opsource.net/schemas/network')
+        ET.register_namespace('', 'http://oec.api.opsource.net/schemas/vip')
+        ET.register_namespace('', 'http://oec.api.opsource.net/schemas/whitelabel')
+        ET.register_namespace('', 'http://oec.api.opsource.net/schemas/datacenter')
+        ET.register_namespace('', 'http://oec.api.opsource.net/schemas/general')
+        ET.register_namespace('', 'http://oec.api.opsource.net/schemas/admin')
+        ET.register_namespace('', 'http://oec.api.opsource.net/schemas/multigeo')
+        ET.register_namespace('', 'http://oec.api.opsource.net/schemas/reset')
+        ET.register_namespace('', 'http://oec.api.opsource.net/schemas/support')
+        ET.register_namespace('', 'http://oec.api.opsource.net/schemas/storage')
+        ET.register_namespace('', 'http://oec.api.opsource.net/schemas/manualimport')
+
+        import re
+        content = re.sub(' xmlns="[^"]+"', '', content, count=1)
+        #ET.register_namespace('', 'http://oec.api.opsource.net/schemas/server')
+        tree = ET.fromstring(content)
+        root = tree
+        print("%s   :   %s"   %(root.tag, root.attrib))
+
+        for elem in tree.iter():
+            print elem.tag, elem.attrib, elem.text
+
+        e = tree.findall("serverWithState")
+        for server in e:
+            print server.text
+
+        namespace = {"http://oec.api.opsource.net/schemas/server"}
+        #e = doc.findall('./ServersWithState/serverWithState/name')
+        #for i in e:
+            #print i.text
+
+        #for server in doc:
+            #print("DOC:  %s" % doc)
+            #print("%s: %s " % (server.attrib['id'], server.attrib['location'] ))
+            #print server.tag, server.attrib
+            #print("%s " % (server.Element.findall('name')) )
+            #print ("%s" % server.findall("."))
+            #print ("BLAH")
+
+        #for server2 in doc.findall("./*"):
+            #print ("%s" % server2.tag )
+
+        #serverWithState
+        from elements import Element
+        class Example(Element):
+                _tag = 'Example'
+
+                version = TextAttribute()
+
+                hacker = BoolElement(tag="Hacker")
+                name = TextElement(name="Name")
+                age = IntegerElement(name="Age")
+
+
+        class Parameter(Element):
+              _tag = 'serverWithState'
+              _attributes = Element._attributes.copy()
+
+              _attributes['id'] = 'id'
+              _attributes['location'] = 'location'
+
+              def __init__(self, id=None, location=None):
+                self.id = id
+                self.location = location
+
+        e = Parameter()
+        e.from_string(content)
+        print e
+
+        import sys
+        import time
+        #time.sleep( 15 )
+        sys.exit()
+        self.client = doc
+
+
+    @staticmethod
+    def get_servers_url(protocol, hostname):
+        servers_url = None
+        if servers_url is None:
+            #servers_url = '%s://%s/sdk/vimService.wsdl' % (protocol, host_name )
+            servers_url = 'https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?'
+        return servers_url
 
     @staticmethod
     def get_wsdl_url(protocol, host_name):
+        print ("WSDL URL")
         """
         allows override of the wsdl location, making this static
         means we can test the logic outside of the constructor
@@ -109,10 +310,13 @@ class Vim:
         if wsdl_url is None:
             # calculate default WSDL location if no override supplied
             wsdl_url = '%s://%s/sdk/vimService.wsdl' % (protocol, host_name)
+
+            print ("wsdl_Url: %s" % wsdl_url)
         return wsdl_url
 
     @staticmethod
     def get_soap_url(protocol, host_name):
+        print ("SOAP URL")
         """
         Calculates the location of the SOAP services
         for a particular server. Created as a static
@@ -122,6 +326,7 @@ class Vim:
         :param host_name: localhost or other vSphere server name
         :return: the url to the active vSphere WS Management API
         """
+        print ("SOAP URL: %s://%s/sdk"  % (protocol, host_name))
         return '%s://%s/sdk' % (protocol, host_name)
 
     def get_service_content(self):
