@@ -190,6 +190,16 @@ class Vim:
         print("YAHOOOOOOO")
         """
 
+        import dd_session as ddsession
+        ddsession = ddsession.DDsession()
+
+
+
+        import sys
+        import time
+        #time.sleep( 15 )
+        sys.exit()
+
         import httplib2
         http = httplib2.Http('.cache')
         http.add_credentials(host_username, host_password)
