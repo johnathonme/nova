@@ -57,6 +57,8 @@ class DDsession:
 
         self._session = requests.Session()
 
+        LOG.debug(dir(self._session))
+
 
 
     def parseXML(xmlFile):
