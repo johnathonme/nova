@@ -32,6 +32,7 @@ from nova.virt import driver
 from nova.virt.ddcloudapi import vm_util
 from nova.virt.ddcloudapi import vim
 from nova.virt.ddcloudapi import error_util
+import dd_session
 
 
 LOG = logging.getLogger(__name__)

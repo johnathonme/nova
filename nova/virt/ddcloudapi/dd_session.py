@@ -1,6 +1,7 @@
 from lxml import etree, objectify
 from nova.openstack.common import log as logging
 from oslo.config import cfg
+import requests
 
 CONF = cfg.CONF
 ddcloudapi_opts = [
@@ -47,10 +48,14 @@ class DDsession:
         host_password = CONF.ddcloudapi_host_password
         host_url = CONF.ddcloudapi_url
 
-        self.test(host_username, host_password, host_url)
+        if (self.test(host_username, host_password, host_url, host_ip) == 200):
+            LOG.debug("DDLCOUD CONNECTION TEST SUCCESS")
+
 
         #print ("class session  - init")
         LOG.info("init %s://%s" % (protocol, host_ip))
+
+        self._session = requests.Session()
 
 
 
@@ -60,10 +65,15 @@ class DDsession:
 
             root = objectify.fromstring(xml)
 
-    def test(self, host_username, host_password, host_url):
-        import httplib2
-        http = httplib2.Http('.cache')
-        http.add_credentials(host_username, host_password)
-        response, content = http.request(host_url)
-        LOG.info("response: %s" % response.status)
+    def test(self, host_username, host_password, host_url, host_ip):
+
+        s = requests.Session()
+        response = s.get(host_url, auth=(host_username, host_password))
+
+
+        LOG.info("response: %s" % response.status_code)
+        response.content
         #print("content:  %s" % content)
+
+
+        return response.status_code
