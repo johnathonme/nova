@@ -499,6 +499,47 @@ def search_datastore_spec(client_factory, file_name):
 
 def get_vm_ref_from_name(session, vm_name):
     """Get reference to the VM with the name specified."""
+
+    import requests
+    #host_ip = CONF.ddcloudapi_host_ip
+    #host_username = CONF.ddcloudapi_host_username
+    #host_password = CONF.ddcloudapi_host_password
+    #host_url = CONF.ddcloudapi_url
+    s = requests.Session()
+    response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=('dev1-apiusersucker', 'sucker'))
+    #LOG.info("response: %s" % response.status_code)
+
+    print response.content
+
+    # Namespace stuff
+    DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
+    NS = "{%s}" % DD_NAMESPACE
+
+
+    from lxml import etree, objectify
+
+    root = objectify.fromstring(response.content)
+
+    lst_vm_names = []
+    #for element in root.iter("serverWithState"):
+    #    print("%s - %s" % (element.tag, element.text))
+
+    #for e in root.serverWithState.iterchildren():
+    #    print "%s => %s" % (e.tag, e.text)
+
+    servers  = root.findall("//%sserverWithState" % NS) # find all the groups
+
+    for server in servers:
+        if vm_name == server.name:
+           return server
+        #vm_id = server.attrib['id']
+        #vm_location = server.attrib['location']
+        #lst_vm_names.append(vm_name)
+        #LOG.debug(vm_name)
+
+    return None
+
+
     vms = session._call_method(vim_util, "get_objects",
                 "VirtualMachine", ["name"])
     for vm in vms:
@@ -509,6 +550,47 @@ def get_vm_ref_from_name(session, vm_name):
 
 def get_vm_ref_from_uuid(session, instance_uuid):
     """Get reference to the VM with the uuid specified."""
+
+    import requests
+    #host_ip = CONF.ddcloudapi_host_ip
+    #host_username = CONF.ddcloudapi_host_username
+    #host_password = CONF.ddcloudapi_host_password
+    #host_url = CONF.ddcloudapi_url
+    s = requests.Session()
+    response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=('dev1-apiusersucker', 'sucker'))
+    #LOG.info("response: %s" % response.status_code)
+
+    print response.content
+
+    # Namespace stuff
+    DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
+    NS = "{%s}" % DD_NAMESPACE
+
+
+    from lxml import etree, objectify
+
+    root = objectify.fromstring(response.content)
+
+    lst_vm_names = []
+    #for element in root.iter("serverWithState"):
+    #    print("%s - %s" % (element.tag, element.text))
+
+    #for e in root.serverWithState.iterchildren():
+    #    print "%s => %s" % (e.tag, e.text)
+
+    servers  = root.findall("//%sserverWithState" % NS) # find all the groups
+
+    for server in servers:
+        if instance_uuid == server.attrib['id']:
+           return server
+        #vm_id = server.attrib['id']
+        #vm_location = server.attrib['location']
+        #lst_vm_names.append(vm_name)
+        #LOG.debug(vm_name)
+
+    return None
+
+
     vms = session._call_method(vim_util, "get_objects",
                 "VirtualMachine", ["name"])
     for vm in vms:

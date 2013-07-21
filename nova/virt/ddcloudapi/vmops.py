@@ -39,10 +39,10 @@ from nova import exception
 from nova.openstack.common import excutils
 from nova.openstack.common import log as logging
 from nova.virt import driver
-from nova.virt.vmwareapi import vif as vmwarevif
-from nova.virt.vmwareapi import vim_util
-from nova.virt.vmwareapi import vm_util
-from nova.virt.vmwareapi import vmware_images
+from nova.virt.ddcloudapi import vif as vmwarevif
+from nova.virt.ddcloudapi import vim_util
+from nova.virt.ddcloudapi import vm_util
+from nova.virt.ddcloudapi import vmware_images
 
 
 vmware_vif_opts = [
@@ -90,9 +90,59 @@ class VMwareVMOps(object):
     def list_instances(self):
         """Lists the VM instances that are registered with the ESX host."""
         LOG.debug(_("Getting list of instances"))
+
+        """
         vms = self._session._call_method(vim_util, "get_objects",
                      "VirtualMachine",
                      ["name", "runtime.connectionState"])
+        """
+        # Lets do it using REST - https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?
+        import requests
+        host_ip = CONF.ddcloudapi_host_ip
+        host_username = CONF.ddcloudapi_host_username
+        host_password = CONF.ddcloudapi_host_password
+        host_url = CONF.ddcloudapi_url
+        s = requests.Session()
+        response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=('dev1-apiusersucker', 'sucker'))
+        LOG.info("response: %s" % response.status_code)
+
+        print response.content
+
+        # Namespace stuff
+        DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
+        NS = "{%s}" % DD_NAMESPACE
+
+
+        from lxml import etree, objectify
+
+        root = objectify.fromstring(response.content)
+
+        lst_vm_names = []
+        #for element in root.iter("serverWithState"):
+        #    print("%s - %s" % (element.tag, element.text))
+
+        #for e in root.serverWithState.iterchildren():
+        #    print "%s => %s" % (e.tag, e.text)
+
+        servers  = root.findall("//%sserverWithState" % NS) # find all the groups
+
+        for server in servers:
+            vm_name = server.name
+            vm_id = server.attrib['id']
+            vm_location = server.attrib['location']
+            lst_vm_names.append(vm_name)
+            LOG.debug(vm_name)
+        return lst_vm_names
+
+        #import dd_session as ddsession
+        #mysession = ddsession.DDsession()
+        #instances = ddsession.get_instances
+        #print instances
+        import sys
+        sys.exit()
+
+        vms = None
+
         lst_vm_names = []
         for vm in vms:
             vm_name = None
@@ -638,7 +688,7 @@ class VMwareVMOps(object):
                 self._session._wait_for_task(instance['uuid'], destroy_task)
                 LOG.debug(_("Destroyed the VM"), instance=instance)
             except Exception as excep:
-                LOG.warn(_("In vmwareapi:vmops:delete, got this exception"
+                LOG.warn(_("In ddcloudapi:vmops:delete, got this exception"
                            " while destroying the VM: %s") % str(excep))
 
             if network_info:
@@ -686,7 +736,7 @@ class VMwareVMOps(object):
                                            "UnregisterVM", vm_ref)
                 LOG.debug(_("Unregistered the VM"), instance=instance)
             except Exception as excep:
-                LOG.warn(_("In vmwareapi:vmops:destroy, got this exception"
+                LOG.warn(_("In ddcloudapi:vmops:destroy, got this exception"
                            " while un-registering the VM: %s") % str(excep))
 
             if network_info:
@@ -716,7 +766,7 @@ class VMwareVMOps(object):
                                {'datastore_name': datastore_name},
                               instance=instance)
                 except Exception as excep:
-                    LOG.warn(_("In vmwareapi:vmops:destroy, "
+                    LOG.warn(_("In ddcloudapi:vmops:destroy, "
                                  "got this exception while deleting"
                                  " the VM contents from the disk: %s")
                                  % str(excep))
@@ -724,11 +774,11 @@ class VMwareVMOps(object):
             LOG.exception(exc, instance=instance)
 
     def pause(self, instance):
-        msg = _("pause not supported for vmwareapi")
+        msg = _("pause not supported for ddcloudapi")
         raise NotImplementedError(msg)
 
     def unpause(self, instance):
-        msg = _("unpause not supported for vmwareapi")
+        msg = _("unpause not supported for ddcloudapi")
         raise NotImplementedError(msg)
 
     def suspend(self, instance):
@@ -953,7 +1003,7 @@ class VMwareVMOps(object):
             self._session._wait_for_task(instance['uuid'], destroy_task)
             LOG.debug(_("Destroyed the VM"), instance=instance)
         except Exception as excep:
-            LOG.warn(_("In vmwareapi:vmops:confirm_migration, got this "
+            LOG.warn(_("In ddcloudapi:vmops:confirm_migration, got this "
                      "exception while destroying the VM: %s") % str(excep))
 
         if network_info:
@@ -1060,7 +1110,7 @@ class VMwareVMOps(object):
 
     def get_diagnostics(self, instance):
         """Return data about VM diagnostics."""
-        msg = _("get_diagnostics not implemented for vmwareapi")
+        msg = _("get_diagnostics not implemented for ddcloudapi")
         raise NotImplementedError(msg)
 
     def get_console_output(self, instance):
@@ -1087,7 +1137,7 @@ class VMwareVMOps(object):
         """Return connection info for a vnc console."""
         vm_ref = vm_util.get_vm_ref(self._session, instance)
 
-        return {'host': CONF.vmwareapi_host_ip,
+        return {'host': CONF.ddcloudapi_host_ip,
                 'port': self._get_vnc_port(vm_ref),
                 'internal_access_path': None}
 

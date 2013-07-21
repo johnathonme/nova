@@ -160,7 +160,49 @@ def get_dynamic_property(vim, mobj, type, property_name):
 def get_objects(vim, type, properties_to_collect=None, all=False):
     """Gets the list of objects of the type specified."""
 
-    print("VIM and TYPE:   %s    %s"  %(vim, type))
+    print("VIM and TYPE and PROS  and ALL:   %s    %s   %s   %s"  %(vim, type, properties_to_collect, all))
+    # None    VirtualMachine   ['name']   False
+
+    if type == ["VirtualMachine"]:
+        import requests
+        host_ip = CONF.ddcloudapi_host_ip
+        host_username = CONF.ddcloudapi_host_username
+        host_password = CONF.ddcloudapi_host_password
+        host_url = CONF.ddcloudapi_url
+        s = requests.Session()
+        response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=('dev1-apiusersucker', 'sucker'))
+        LOG.info("response: %s" % response.status_code)
+
+        print response.content
+
+        # Namespace stuff
+        DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
+        NS = "{%s}" % DD_NAMESPACE
+
+
+        from lxml import etree, objectify
+
+        root = objectify.fromstring(response.content)
+
+        lst_vm_names = []
+        #for element in root.iter("serverWithState"):
+        #    print("%s - %s" % (element.tag, element.text))
+
+        #for e in root.serverWithState.iterchildren():
+        #    print "%s => %s" % (e.tag, e.text)
+
+        servers  = root.findall("//%sserverWithState" % NS) # find all the groups
+
+        for server in servers:
+            vm_name = server.name
+            vm_id = server.attrib['id']
+            vm_location = server.attrib['location']
+            lst_vm_names.append(vm_name)
+            LOG.debug(vm_name)
+        #return lst_vm_names
+
+    somedumbstringobj = "blah"
+    return somedumbstringobj
 
 
     if not properties_to_collect:
@@ -223,3 +265,4 @@ def get_properties_for_a_collection_of_objects(vim, type,
                                             lst_obj_specs, [prop_spec])
     return vim.RetrieveProperties(vim.get_service_content().propertyCollector,
                                    specSet=[prop_filter_spec])
+

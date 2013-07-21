@@ -32,6 +32,7 @@ class Host(object):
     """
     def __init__(self, session):
         self._session = session
+        LOG.debug('Host Object')
 
     def host_power_action(self, host, action):
         """Reboots or shuts down the host."""
@@ -87,6 +88,7 @@ class HostState(object):
     """
     def __init__(self, session, host_name):
         super(HostState, self).__init__()
+        LOG.debug('HostState Object')
         self._session = session
         self._host_name = host_name
         self._stats = {}
@@ -150,6 +152,7 @@ class VCState(object):
     """
     def __init__(self, session, host_name, cluster):
         super(VCState, self).__init__()
+        LOG.info('Starting the init')
         self._session = session
         self._host_name = host_name
         self._cluster = cluster
@@ -167,6 +170,32 @@ class VCState(object):
     def update_status(self):
         """Update the current state of the host.
         """
+        LOG.info('Gonna update_status')
+
+        data = {}
+        data["vcpus"] = 16
+        data["cpu_info"] =\
+        {"vendor": 'intel',
+         "model": 'Intel(R) Core(TM) i7-3720QM CPU @ 2.60GHz',
+         "topology": {"cores": '10',
+                      "sockets": '4',
+                      "threads": '10'}
+        }
+        data["disk_total"] = 2500000000000 / (1024 * 1024 * 1024)
+        data["disk_available"] = 2500000000000 / (1024 * 1024 * 1024)
+        data["disk_used"] = 0
+        data["host_memory_total"] = 549755813888 / (1024 * 1024)
+        data["host_memory_free"] = 549755813888 / (1024 * 1024)
+        data["hypervisor_type"] = "cloudcontrol"
+        data["hypervisor_version"] = "0.9"
+        data["hypervisor_hostname"] = self._host_name
+        data["supported_instances"] = [('i686', 'vmware', 'hvm'),
+                                       ('x86_64', 'vmware', 'hvm')]
+
+        self._stats = data
+        return data
+
+
         host_mor = vm_util.get_host_ref(self._session, self._cluster)
         if host_mor is None:
             return

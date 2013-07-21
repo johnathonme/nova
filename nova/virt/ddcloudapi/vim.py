@@ -145,20 +145,19 @@ class Vim:
 
         self._protocol = protocol
         self._host_name = host
-        self.wsdl_url = Vim.get_wsdl_url(protocol, host)
-        self.servers_url = Vim.get_servers_url(protocol, host)
-        self.url = Vim.get_soap_url(protocol, host)
-        self.url = Vim.get_servers_url(protocol, host)
-        print ("CONNECTING>>>>>>>")
+        #self.wsdl_url = Vim.get_wsdl_url(protocol, host)
+        #self.servers_url = Vim.get_servers_url(protocol, host)
+        #self.url = Vim.get_soap_url(protocol, host)
+        #self.url = Vim.get_servers_url(protocol, host)
 
         import urllib2
 
 
 
-	host_ip = CONF.ddcloudapi_host_ip
+    	host_ip = CONF.ddcloudapi_host_ip
         host_username = CONF.ddcloudapi_host_username
         host_password = CONF.ddcloudapi_host_password
-	host_url = CONF.ddcloudapi_url
+    	host_url = CONF.ddcloudapi_url
 
         """
         password_manager = urllib2.HTTPPasswordMgrWithDefaultRealm()
@@ -191,7 +190,9 @@ class Vim:
         """
 
         import dd_session as ddsession
-        ddsession = ddsession.DDsession()
+        #mysession = ddsession.DDsession()
+
+        #print mysession
 
 
 

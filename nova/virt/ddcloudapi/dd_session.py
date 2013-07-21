@@ -29,6 +29,8 @@ ddcloudapi_opts = [
     ]
 
 CONF.register_opts(ddcloudapi_opts)
+#CONF.import_opt('ddcloudapi_host_ip', 'ddcloudapi_host_ip', 'ddcloudapi_host_password')
+#CONF.import_opt('ddcloudapi_url')
 LOG = logging.getLogger(__name__)
 #logging.debug('ddcloudapi: A debug message!')
 
@@ -57,8 +59,17 @@ class DDsession:
 
         self._session = requests.Session()
 
-        LOG.debug(dir(self._session))
+        #LOG.debug(dir(self._session.__attrs__))
 
+    @property
+    def _session(self):
+        return self._session
+
+    """
+    def @_session.setter
+        def _session(self, value):
+        self._session = value
+    """
 
 
     def parseXML(xmlFile):
@@ -69,8 +80,8 @@ class DDsession:
 
     def test(self, host_username, host_password, host_url, host_ip):
 
-        s = requests.Session()
-        response = s.get(host_url, auth=(host_username, host_password))
+        #s = requests.Session()
+        response = self._session.get(host_url, auth=(host_username, host_password))
 
 
         LOG.info("response: %s" % response.status_code)
@@ -79,3 +90,9 @@ class DDsession:
 
 
         return response.status_code
+
+    def get_instances(self):
+        s = requests.Session()
+        response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=(self.host_username, self.host_password))
+        LOG.info("response: %s" % response.status_code)
+

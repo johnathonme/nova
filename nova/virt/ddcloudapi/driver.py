@@ -31,8 +31,13 @@ from nova.virt import driver
 
 from nova.virt.ddcloudapi import vm_util
 from nova.virt.ddcloudapi import vim
+from nova.virt.ddcloudapi import vim_util
 from nova.virt.ddcloudapi import error_util
+from nova.virt.ddcloudapi import host
+from nova.virt.ddcloudapi import vmops
+from nova.virt.ddcloudapi import volumeops
 import dd_session
+import requests
 
 
 LOG = logging.getLogger(__name__)
@@ -72,6 +77,12 @@ ddcloudapi_opts = [
                     'socket error, etc. '
                     'Used only if compute_driver is '
                     'ddcloudapi.CloudcontrolESXDriver or ddcloudapi.CloudcontrolVCDriver.'),
+    cfg.StrOpt('ddcloudapi_apistring',
+                default = None,
+                help='DD Cloud API version string like oec/0.9'),
+    cfg.StrOpt('ddcloudapi_orgid',
+                default = None,
+                help='DD Cloud client Org Id, helper value during dev'),
     cfg.IntOpt('vnc_port',
                default=5900,
                help='VNC starting port'),
@@ -285,6 +296,7 @@ class VMwareESXDriver(driver.ComputeDriver):
         :returns: dictionary describing resources
 
         """
+        LOG.debug('Getting Available Resource')
         host_stats = self.get_host_stats(refresh=True)
 
         # Updating host information
@@ -429,6 +441,7 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
     """The Cloudontrol host connection object."""
 
     def __init__(self, virtapi, read_only=False, scheme="https"):
+        super(CloudcontrolapiDriver, self).__init__(virtapi)
 
         self._host_ip = CONF.ddcloudapi_host_ip
         host_username = CONF.ddcloudapi_host_username
@@ -436,13 +449,38 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
         api_retry_count = CONF.ddcloudapi_api_retry_count
 
         # Johnathon Test
-        print("TEST FROM JOHNON")
+        LOG.info("CloudcontrolapiDriver Routines")
         self._session = VMwareAPISession(self._host_ip,
                                          host_username, host_password,
                                          api_retry_count, scheme=scheme)
+        ddmyaccounturl = ("https://%s/%s/myaccount" % ( CONF.ddcloudapi_host_ip, CONF.ddcloudapi_apistring, ))
+        ddservermethodurl = ("https://%s/%s/%s/serverWithState?" % ( CONF.ddcloudapi_host_ip, CONF.ddcloudapi_apistring, CONF.ddcloudapi_orgid))
+
+        print ddmyaccounturl
+        print ddservermethodurl
+
+        thisreq = requests.Session()
+        response = thisreq.get(ddmyaccounturl, auth=(host_username, host_password))
+        LOG.info("response: %s" % response.status_code)
+        #response.content
 
 
-        super(CloudcontrolapiDriver, self).__init__(virtapi)
+        self._host = host.Host(self._session)
+        self._host_state = None
+        self._cluster = 'AP1'
+
+        print self._host
+
+        self._volumeops = volumeops.VMwareVolumeOps(self._session,
+                                                    self._cluster)
+        self._vmops = vmops.VMwareVMOps(self._session, self.virtapi,
+                                        self._volumeops, self._cluster)
+
+        self._vc_state = None
+        return
+        import sys
+        sys.exit()
+        #super(CloudcontrolapiDriver, self).__init__(virtapi)
         self._cluster_name = CONF.ddcloudapi_cluster_name
         if not self._cluster_name:
             self._cluster = None
@@ -475,6 +513,206 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
 
 
 
+    def init_host(self, host):
+        """Do the initialization that needs to be done."""
+        # FIXME(johnathon): implement may need to do this
+        pass
+
+    def legacy_nwinfo(self):
+        return False
+
+    def list_instances(self):
+        """List VM instances."""
+        return self._vmops.list_instances()
+
+    def spawn(self, context, instance, image_meta, injected_files,
+              admin_password, network_info=None, block_device_info=None):
+        """Create VM instance."""
+        self._vmops.spawn(context, instance, image_meta, network_info,
+                          block_device_info)
+
+    def snapshot(self, context, instance, name, update_task_state):
+        """Create snapshot from a running VM instance."""
+        self._vmops.snapshot(context, instance, name, update_task_state)
+
+    def reboot(self, context, instance, network_info, reboot_type,
+               block_device_info=None, bad_volumes_callback=None):
+        """Reboot VM instance."""
+        self._vmops.reboot(instance, network_info)
+
+    def destroy(self, instance, network_info, block_device_info=None,
+                destroy_disks=True):
+        """Destroy VM instance."""
+        self._vmops.destroy(instance, network_info, destroy_disks)
+
+    def pause(self, instance):
+        """Pause VM instance."""
+        self._vmops.pause(instance)
+
+    def unpause(self, instance):
+        """Unpause paused VM instance."""
+        self._vmops.unpause(instance)
+
+    def suspend(self, instance):
+        """Suspend the specified instance."""
+        self._vmops.suspend(instance)
+
+    def resume(self, instance, network_info, block_device_info=None):
+        """Resume the suspended VM instance."""
+        self._vmops.resume(instance)
+
+    def rescue(self, context, instance, network_info, image_meta,
+               rescue_password):
+        """Rescue the specified instance."""
+        self._vmops.rescue(context, instance, network_info, image_meta)
+
+    def unrescue(self, instance, network_info):
+        """Unrescue the specified instance."""
+        self._vmops.unrescue(instance)
+
+    def power_off(self, instance):
+        """Power off the specified instance."""
+        self._vmops.power_off(instance)
+
+    def power_on(self, context, instance, network_info,
+                 block_device_info=None):
+        """Power on the specified instance."""
+        self._vmops._power_on(instance)
+
+    def resume_state_on_host_boot(self, context, instance, network_info,
+                                  block_device_info=None):
+        """resume guest state when a host is booted."""
+        # Check if the instance is running already and avoid doing
+        # anything if it is.
+        instances = self.list_instances()
+        if instance['uuid'] not in instances:
+            LOG.warn(_('Instance cannot be found in host, or in an unknown'
+                'state.'), instance=instance)
+        else:
+            state = vm_util.get_vm_state_from_name(self._session,
+                instance['uuid'])
+            ignored_states = ['poweredon', 'suspended']
+
+            if state.lower() in ignored_states:
+                return
+        # Instance is not up and could be in an unknown state.
+        # Be as absolute as possible about getting it back into
+        # a known and running state.
+        self.reboot(context, instance, network_info, 'hard',
+            block_device_info)
+
+    def poll_rebooting_instances(self, timeout, instances):
+        """Poll for rebooting instances."""
+        self._vmops.poll_rebooting_instances(timeout, instances)
+
+    def get_info(self, instance):
+        """Return info about the VM instance."""
+        return self._vmops.get_info(instance)
+
+    def get_diagnostics(self, instance):
+        """Return data about VM diagnostics."""
+        return self._vmops.get_info(instance)
+
+    def get_console_output(self, instance):
+        """Return snapshot of console."""
+        return self._vmops.get_console_output(instance)
+
+    def get_vnc_console(self, instance):
+        """Return link to instance's VNC console."""
+        return self._vmops.get_vnc_console(instance)
+
+    def get_volume_connector(self, instance):
+        """Return volume connector information."""
+        return self._volumeops.get_volume_connector(instance)
+
+    def get_host_ip_addr(self):
+        """Retrieves the IP address of the ESX host."""
+        return self._host_ip
+
+    def attach_volume(self, connection_info, instance, mountpoint):
+        """Attach volume storage to VM instance."""
+        return self._volumeops.attach_volume(connection_info,
+                                             instance,
+                                             mountpoint)
+
+    def detach_volume(self, connection_info, instance, mountpoint):
+        """Detach volume storage to VM instance."""
+        return self._volumeops.detach_volume(connection_info,
+                                             instance,
+                                             mountpoint)
+
+    def get_console_pool_info(self, console_type):
+        """Get info about the host on which the VM resides."""
+        return {'address': CONF.vmwareapi_host_ip,
+                'username': CONF.vmwareapi_host_username,
+                'password': CONF.vmwareapi_host_password}
+
+    def get_available_resource(self, nodename):
+        """Retrieve resource info.
+
+        This method is called when nova-compute launches, and
+        as part of a periodic task.
+
+        :returns: dictionary describing resources
+
+        """
+        host_stats = self.get_host_stats(refresh=True)
+
+        # Updating host information
+        dic = {'vcpus': host_stats["vcpus"],
+               'memory_mb': host_stats['host_memory_total'],
+               'local_gb': host_stats['disk_total'],
+               'vcpus_used': 0,
+               'memory_mb_used': host_stats['host_memory_total'] -
+                                 host_stats['host_memory_free'],
+               'local_gb_used': host_stats['disk_used'],
+               'hypervisor_type': host_stats['hypervisor_type'],
+               'hypervisor_version': host_stats['hypervisor_version'],
+               'hypervisor_hostname': host_stats['hypervisor_hostname'],
+               'cpu_info': jsonutils.dumps(host_stats['cpu_info'])}
+
+        return dic
+
+    def update_host_status(self):
+        """Update the status info of the host, and return those values
+           to the calling program.
+        """
+
+        return self.host_state.update_status()
+
+    def get_host_stats(self, refresh=False):
+        """Return the current state of the host.
+
+           If 'refresh' is True, run the update first.
+        """
+        return self.host_state.get_host_stats(refresh=refresh)
+
+    def host_power_action(self, host, action):
+        """Reboots, shuts down or powers up the host."""
+        return self._host.host_power_action(host, action)
+
+    def host_maintenance_mode(self, host, mode):
+        """Start/Stop host maintenance window. On start, it triggers
+           guest VMs evacuation.
+        """
+        return self._host.host_maintenance_mode(host, mode)
+
+    def set_host_enabled(self, host, enabled):
+        """Sets the specified host's ability to accept new instances."""
+        return self._host.set_host_enabled(host, enabled)
+
+    def inject_network_info(self, instance, network_info):
+        """inject network info for specified instance."""
+        self._vmops.inject_network_info(instance, network_info)
+
+    def plug_vifs(self, instance, network_info):
+        """Plug VIFs into networks."""
+        self._vmops.plug_vifs(instance, network_info)
+
+    def unplug_vifs(self, instance, network_info):
+        """Unplug VIFs from networks."""
+        self._vmops.unplug_vifs(instance, network_info)
+
 class VMwareAPISession(object):
     """
     Sets up a session with the ESX host and handles all
@@ -498,14 +736,25 @@ class VMwareAPISession(object):
 
     def _create_session(self):
 
-        print ("CREATE SESSION")
+        LOG.info("CREATE SESSION")
         """Creates a session with the ESX host."""
         while True:
             try:
                 # Login and setup the session with the ESX host for making
                 # API calls
-                self.vim = self._get_vim_object()
-                print ("GOT VIM OBJECT")
+                #self.vim = self._get_vim_object()
+                LOG.info("GOT VIM OBJECT")
+                #sesobj = ddsession.DDsession()
+                #session = sesobj._session
+
+                host_ip = CONF.ddcloudapi_host_ip
+                host_username = CONF.ddcloudapi_host_username
+                host_password = CONF.ddcloudapi_host_password
+    	        host_url = CONF.ddcloudapi_url
+
+                LOG.debug("%s" % (CONF.ddcloudapi_url))
+                session = requests.Session()
+
                 return
                 session = self.vim.Login(
                                self.vim.get_service_content().sessionManager,
