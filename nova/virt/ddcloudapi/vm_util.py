@@ -506,7 +506,7 @@ def get_vm_ref_from_name(session, vm_name):
     #host_password = CONF.ddcloudapi_host_password
     #host_url = CONF.ddcloudapi_url
     s = requests.Session()
-    response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=('dev1-apiusersucker', 'sucker'))
+    response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=('dev1-apiuser', 'cloudcloudcloud'))
     #LOG.info("response: %s" % response.status_code)
 
     print response.content
@@ -557,7 +557,7 @@ def get_vm_ref_from_uuid(session, instance_uuid):
     #host_password = CONF.ddcloudapi_host_password
     #host_url = CONF.ddcloudapi_url
     s = requests.Session()
-    response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=('dev1-apiusersucker', 'sucker'))
+    response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=('dev1-apiuser', 'cloudcloudcloud'))
     #LOG.info("response: %s" % response.status_code)
 
     print response.content
@@ -793,3 +793,6 @@ def get_datastore_ref_and_name(session, cluster=None, host=None):
             return elem.obj, ds_name, ds_cap, ds_free
 
         raise exception.DatastoreNotFound()
+
+
+

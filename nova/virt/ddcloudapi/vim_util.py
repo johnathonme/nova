@@ -170,7 +170,7 @@ def get_objects(vim, type, properties_to_collect=None, all=False):
         host_password = CONF.ddcloudapi_host_password
         host_url = CONF.ddcloudapi_url
         s = requests.Session()
-        response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=('dev1-apiusersucker', 'sucker'))
+        response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=('dev1-apiuser', 'cloudcloudcloud'))
         LOG.info("response: %s" % response.status_code)
 
         print response.content
