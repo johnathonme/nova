@@ -105,6 +105,34 @@ class HostState(object):
     def update_status(self):
         """Update the current state of the host.
         """
+
+
+        LOG.info('Gonna update_status')
+
+        data = {}
+        data["vcpus"] = 16
+        data["cpu_info"] =\
+        {"vendor": 'intel',
+         "model": 'Intel(R) Core(TM) i7-3720QM CPU @ 2.60GHz',
+         "topology": {"cores": '10',
+                      "sockets": '4',
+                      "threads": '10'}
+        }
+        data["disk_total"] = 2500000000000 / (1024 * 1024 * 1024)
+        data["disk_available"] = 2500000000000 / (1024 * 1024 * 1024)
+        data["disk_used"] = 0
+        data["host_memory_total"] = 549755813888 / (1024 * 1024)
+        data["host_memory_free"] = 549755813888 / (1024 * 1024)
+        data["hypervisor_type"] = "cloudcontrol"
+        data["hypervisor_version"] = "0.9"
+        data["hypervisor_hostname"] = self._host_name
+        data["supported_instances"] = [('i686', 'vmware', 'hvm'),
+                                       ('x86_64', 'vmware', 'hvm')]
+
+        self._stats = data
+        return data
+
+
         host_mor = self._session._call_method(vim_util, "get_objects",
                                               "HostSystem")[0].obj
         summary = self._session._call_method(vim_util,

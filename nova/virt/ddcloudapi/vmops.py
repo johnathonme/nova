@@ -89,7 +89,7 @@ class VMwareVMOps(object):
 
     def list_instances(self):
         """Lists the VM instances that are registered with the ESX host."""
-        LOG.debug(_("Getting list of instances"))
+        LOG.debug("Getting list of instances")
 
         """
         vms = self._session._call_method(vim_util, "get_objects",
@@ -104,7 +104,7 @@ class VMwareVMOps(object):
         host_url = CONF.ddcloudapi_url
         s = requests.Session()
         response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=('dev1-apiuser', 'cloudcloudcloud'))
-        LOG.info("response: %s" % response.status_code)
+        #LOG.info("list_instances response: %s" % response.status_code)
 
         print response.content
 
@@ -160,6 +160,8 @@ class VMwareVMOps(object):
 
     def spawn(self, context, instance, image_meta, network_info,
               block_device_info=None):
+
+        LOG.debug('SPAWNING: %s %s %s %s %s' % (context, instance, image_meta, network_info, block_device_info))
         """
         Creates a VM instance.
 
@@ -179,13 +181,50 @@ class VMwareVMOps(object):
           3.3. Delete the -sparse.vmdk file.
         4. Attach the disk to the VM by reconfiguring the same.
         5. Power on the VM.
+        USefull stuff
+        instance['name']
+
         """
 
+        from lxml import etree
+        root = etree.Element("Server", xmlns="http://oec.api.opsource.net/schemas/server")
+        itemname = etree.SubElement(root, "name")
+        itemname.text = instance['display_name']
+            #"0fde991d-4fa0-489b-a365-72f7d5ce85bc"
+        itemdescription = etree.SubElement(root, "description")
+        itemdescription.text = ("stackname:%s,stackuuid:%s,stackproject_id:%s,stackimage_ref:%s" % (instance['name'],instance['uuid'], instance['project_id'], instance['image_ref']) )
+        itemvlanResourcePath = etree.SubElement(root, "vlanResourcePath")
+        itemvlanResourcePath.text = "/oec/e2c43389-90de-4498-b7d0-056e8db0b381/network/48359012-a8da-11e2-96ef-000af700e018"
+        itemimageResourcePath = etree.SubElement(root, "imageResourcePath")
+        itemimageResourcePath.text = "/oec/base/image/65cf01aa-dfe2-11e2-a7c0-000af700e018"
+        itemadministratorPassword = etree.SubElement(root, "administratorPassword")
+        itemadministratorPassword.text = "cloudcloudcloud"
+        itemisStarted = etree.SubElement(root, "isStarted")
+        itemisStarted.text = "true"
+        newserverstring = etree.tostring(root, method='xml', encoding="UTF-8", xml_declaration=True)
+
+        LOG.debug('ABOUT TO POST:  %s'  % newserverstring)
+
+
+        import requests
+        s = requests.Session()
+        url = 'https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/server'
+        headers = {'content-type': 'application/xml'}
+        response = s.post(url, data=newserverstring, headers=headers, auth=('dev1-apiuser', 'cloudcloudcloud'))
+        print s.post(url, data=newserverstring, headers=headers, auth=('dev1-apiuser', 'cloudcloudcloud')).text
+        LOG.debug('POSTING:  %s'  % response.text)
+
+        LOG.debug('POST RESPONSE: %s and explain: %s' % (response, response.text))
+
+        LOG.debug(_("Created VM on CloudControl "), instance=instance)
+
+        """
         client_factory = self._session._get_vim().client.factory
         service_content = self._session._get_vim().get_service_content()
         ds = vm_util.get_datastore_ref_and_name(self._session, self._cluster)
         data_store_ref = ds[0]
         data_store_name = ds[1]
+        """
 
         def _get_image_properties():
             """
@@ -1081,6 +1120,7 @@ class VMwareVMOps(object):
 
     def get_info(self, instance):
         """Return data about the VM instance."""
+        """
         vm_ref = vm_util.get_vm_ref(self._session, instance)
 
         lst_properties = ["summary.config.numCpu",
@@ -1103,10 +1143,17 @@ class VMwareVMOps(object):
                     pwr_state = VMWARE_POWER_STATES[prop.val]
 
         return {'state': pwr_state,
-                'max_mem': max_mem,
+                'max_mem': max_m2147483648em,
                 'mem': max_mem,
                 'num_cpu': num_cpu,
                 'cpu_time': 0}
+        """
+        return {'state': power_state.RUNNING,
+                'max_mem': 2147483648,
+                'mem': 2147483648,
+                'num_cpu': 4,
+                'cpu_time': 0}
+
 
     def get_diagnostics(self, instance):
         """Return data about VM diagnostics."""
@@ -1253,10 +1300,13 @@ class VMwareVMOps(object):
 
     def _get_vmfolder_ref(self):
         """Get the Vm folder ref from the datacenter."""
+        """
         dc_objs = self._session._call_method(vim_util, "get_objects",
                                              "Datacenter", ["vmFolder"])
         # There is only one default datacenter in a standalone ESX host
         vm_folder_ref = dc_objs[0].propSet[0].val
+        """
+        vm_folder_ref = "BLAH"
         return vm_folder_ref
 
     def _get_res_pool_ref(self):

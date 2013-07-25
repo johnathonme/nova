@@ -600,12 +600,13 @@ def get_vm_ref_from_uuid(session, instance_uuid):
 
 def get_vm_ref(session, instance):
     """Get reference to the VM through uuid or vm name."""
-    vm_ref = get_vm_ref_from_uuid(session, instance['uuid'])
-    if not vm_ref:
-        vm_ref = get_vm_ref_from_name(session, instance['name'])
-    if vm_ref is None:
-        raise exception.InstanceNotFound(instance_id=instance['uuid'])
-    return vm_ref
+    #vm_ref = get_vm_ref_from_uuid(session, instance['uuid'])
+    #if not vm_ref:
+    #    vm_ref = get_vm_ref_from_name(session, instance['name'])
+    #if vm_ref is None:
+        #raise exception.InstanceNotFound(instance_id=instance['uuid'])
+    #return vm_ref
+    return instance['uuid']
 
 
 def get_host_ref_from_id(session, host_id, property_list=None):

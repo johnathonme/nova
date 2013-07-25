@@ -127,6 +127,8 @@ def build_property_filter_spec(client_factory, property_specs, object_specs):
 
 def get_object_properties(vim, collector, mobj, type, properties):
     """Gets the properties of the Managed object specified."""
+    print('vim, collector, mobj, type, properties:  %s  %s  %s  %s  %s'  % (vim, collector, mobj, type, properties))
+    return None
     client_factory = vim.client.factory
     if mobj is None:
         return None
