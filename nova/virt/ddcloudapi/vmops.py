@@ -31,6 +31,7 @@ import simplejson as json
 import sys
 from lxml import etree, objectify
 import requests
+from netaddr import IPAddress
 
 from oslo.config import cfg
 
@@ -1397,7 +1398,8 @@ class VMwareVMOps(object):
         for server in servers:
             hasjson = False
             LOG.debug("INSTANCE COMPARE for %s and %s:" % (server.name, instance['display_name']))
-            privateIp = server.privateIp
+            privateIp = str(server.privateIp)
+            ip = IPAddress(privateIp)
             descriptionstr = str(server.description)
 
             if server.description == "":
@@ -1426,7 +1428,8 @@ class VMwareVMOps(object):
             if hasjson and instance['uuid'] == decoded_serveruuid and server.isDeployed == True and server.isStarted == True and server.state == "NORMAL":
                 LOG.info("Instance %s - isDeployed: %s  isStarted: %s  state:  %s" % (instance.display_name,server.isDeployed,server.isStarted,server.state))
                 state = power_state.RUNNING
-                instance._access_ip_v4 = privateIp
+
+                instance.access_ip_v4 = privateIp
                 instance.save()
                 #instance.task_state = ""
                 #instance.save()
@@ -1436,16 +1439,45 @@ class VMwareVMOps(object):
 
             if hasjson and instance['uuid'] == decoded_serveruuid and server.isDeployed == True and server.isStarted == False and server.state == "NORMAL":
                 LOG.info("Instance %s - isDeployed: %s  isStarted: %s  state:  %s" % (instance.display_name,server.isDeployed,server.isStarted,server.state))
-                state = power_state.RUNNING
-                #0x04
-                #power_state.SHUTDOWN
-                instance._access_ip_v4 = privateIp
+
+                """
+                update_data = dict(power_state=current_power_state,
+                           vm_state=vm_states.ACTIVE,
+                           task_state=None,
+                           expected_task_state=task_states.SPAWNING,
+                           launched_at=timeutils.utcnow())
+                update_data['access_ip_v4'] = ip['address']
+                self._instance_update(context, instance['uuid'],
+                                             **update_data)
+                """
+
+                # 3 States
+                #instance['power_state']
+                #instance['task_state']
+                #instance['vm_state']
+                LOG.warning("Existing THREE States are: %s : %s : %s" % (instance['power_state'],instance['task_state'],instance['vm_state']))
+                instance['power_state'] = power_state.SHUTDOWN
+                instance['task_state'] = None
+                instance['vm_state'] = vm_states.STOPPED
+                instance.save(expected_task_state=(None,task_states.SPAWNING,task_states.POWERING_OFF,
+                                                   task_states.STOPPING))
+
+                state = power_state.SHUTDOWN
+                #state = power_state.NOSTATE
+
+                instance.access_ip_v4 = privateIp
                 instance.save()
-                #instance.task_state = ""
-                #instance.save()
+
+
+                """
+                instance.power_state = power_state.NOSTATE
+                instance.save
+                instance.task_state = None
+                instance.save()
                 instance.vm_state = vm_states.STOPPED
                 #m_states.SUSPENDED
                 instance.save()
+                """
 
 
             if hasjson and server.name == instance.display_name and server.state == "PENDING_ADD":
