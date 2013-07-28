@@ -20,6 +20,7 @@ A connection to the Cloudcontrolapi platform.
 """
 
 import time
+import uuid
 
 from eventlet import event
 from oslo.config import cfg
@@ -42,6 +43,8 @@ import requests
 
 LOG = logging.getLogger(__name__)
 #logging.debug('ddcloudapi: A debug message!')
+
+_db_content = {}
 
 ddcloudapi_opts = [
     cfg.StrOpt('ddcloudapi_host_ip',
@@ -437,6 +440,11 @@ class VMwareVCDriver(VMwareESXDriver):
         return self._vmops.get_vnc_console_vcenter(instance)
 
 
+class DataObject(object):
+    """Data object base class."""
+    def __init__(self, obj_name=None):
+        self.obj_name = obj_name
+
 
 class CloudcontrolapiDriver(driver.ComputeDriver):
     """The Cloudontrol host connection object."""
@@ -714,6 +722,8 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
         """Unplug VIFs from networks."""
         self._vmops.unplug_vifs(instance, network_info)
 
+
+
 class VMwareAPISession(object):
     """
     Sets up a session with the ESX host and handles all
@@ -737,6 +747,12 @@ class VMwareAPISession(object):
 
     def _create_session(self):
 
+        self._session = str(uuid.uuid4())
+        session = DataObject()
+        session.key = self._session
+        #_db_content['session'][self._session] = session
+        return session
+
         LOG.info("CREATE SESSION")
         """Creates a session with the ESX host."""
         while True:
@@ -756,6 +772,7 @@ class VMwareAPISession(object):
                 LOG.debug("%s" % (CONF.ddcloudapi_url))
                 session = requests.Session()
 
+                self._session_id = "cloudcontrol-AP1"
                 return
                 session = self.vim.Login(
                                self.vim.get_service_content().sessionManager,

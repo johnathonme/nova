@@ -27,12 +27,17 @@ import time
 import urllib
 import urllib2
 import uuid
+import simplejson as json
+import sys
+from lxml import etree, objectify
+import requests
 
 from oslo.config import cfg
 
 from nova import block_device
 from nova.compute import power_state
 from nova.compute import task_states
+from nova.compute import vm_states
 from nova import conductor
 from nova import context as nova_context
 from nova import exception
@@ -65,11 +70,13 @@ LOG = logging.getLogger(__name__)
 VMWARE_POWER_STATES = {
                    'poweredOff': power_state.SHUTDOWN,
                     'poweredOn': power_state.RUNNING,
-                    'suspended': power_state.SUSPENDED}
+                    'suspended': power_state.SUSPENDED,
+                    'building' : power_state.BUILDING}
 VMWARE_PREFIX = 'vmware'
 
 
 RESIZE_TOTAL_STEPS = 4
+SPAWN_TOTAL_STEPS = 11
 
 
 class VMwareVMOps(object):
@@ -103,7 +110,7 @@ class VMwareVMOps(object):
         host_password = CONF.ddcloudapi_host_password
         host_url = CONF.ddcloudapi_url
         s = requests.Session()
-        response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=('dev1-apiuser', 'cloudcloudcloud'))
+        response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=(host_username , host_password ))
         #LOG.info("list_instances response: %s" % response.status_code)
 
         print response.content
@@ -138,7 +145,6 @@ class VMwareVMOps(object):
         #mysession = ddsession.DDsession()
         #instances = ddsession.get_instances
         #print instances
-        import sys
         sys.exit()
 
         vms = None
@@ -158,10 +164,130 @@ class VMwareVMOps(object):
         LOG.debug(_("Got total of %s instances") % str(len(lst_vm_names)))
         return lst_vm_names
 
+    def fetchNetworkid(self, label):
+        #https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/networkWithLocation
+        """
+        <ns4:network>
+        <ns4:id>48359012-a8da-11e2-96ef-000af700e018</ns4:id>
+        <ns4:name>Stack-Network-AP1-1</ns4:name>
+        <ns4:description>Openstack for CaaS testing</ns4:description>
+        <ns4:location>AP1</ns4:location>
+        <ns4:privateNet>10.72.7.0</ns4:privateNet>
+        <ns4:multicast>false</ns4:multicast>
+        </ns4:network>
+        """
+
+        import requests
+        host_ip = CONF.ddcloudapi_host_ip
+        host_username = CONF.ddcloudapi_host_username
+        host_password = CONF.ddcloudapi_host_password
+        host_url = CONF.ddcloudapi_url
+        s = requests.Session()
+        response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/networkWithLocation', auth=(host_username , host_password ))
+        #LOG.info("list_instances response: %s" % response.status_code)
+
+        print response.content
+
+        # Namespace stuff
+        DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
+        DD_NAMESPACE = "http://oec.api.opsource.net/schemas/network"
+        NS = "{%s}" % DD_NAMESPACE
+
+
+        from lxml import etree, objectify
+
+        root = objectify.fromstring(response.content)
+
+        lst_network_names = []
+        #for element in root.iter("serverWithState"):
+        #    print("%s - %s" % (element.tag, element.text))
+
+        #for e in root.serverWithState.iterchildren():
+        #    print "%s => %s" % (e.tag, e.text)
+
+        networks  = root.findall("//%snetwork" % NS) # find all the groups
+
+        for network in networks:
+            if network.name == label:
+                return network.id
+
+
+        return None
+
+
+    def fetchImageid(self, imagelabel, cclocation):
+        #https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/networkWithLocation
+        #https://api-ap.dimensiondata.com/oec/0.9/base/image/deployedWithSoftwareLabels/AP1
+        #https://api-ap.dimensiondata.com/oec/0.9/base/image
+        """
+        <ns4:network>
+        <ns4:id>48359012-a8da-11e2-96ef-000af700e018</ns4:id>
+        <ns4:name>Stack-Network-AP1-1</ns4:name>
+        <ns4:description>Openstack for CaaS testing</ns4:description>
+        <ns4:location>AP1</ns4:location>
+        <ns4:privateNet>10.72.7.0</ns4:privateNet>
+        <ns4:multicast>false</ns4:multicast>
+        </ns4:network>
+        """
+
+        import requests
+        host_ip = CONF.ddcloudapi_host_ip
+        host_username = CONF.ddcloudapi_host_username
+        host_password = CONF.ddcloudapi_host_password
+        host_url = CONF.ddcloudapi_url
+        fetchurl = ("https://api-ap.dimensiondata.com/oec/0.9/base/image/deployedWithSoftwareLabels/%s" % cclocation)
+        s = requests.Session()
+        response = s.get(fetchurl, auth=(host_username , host_password ))
+        #LOG.info("list_instances response: %s" % response.status_code)
+
+        print response.content
+
+        # Namespace stuff
+        DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
+        DD_NAMESPACE = "http://oec.api.opsource.net/schemas/network"
+        DD_NAMESPACE = ""
+        NS = "{%s}" % DD_NAMESPACE
+
+
+        from lxml import etree, objectify
+
+        root = objectify.fromstring(response.content)
+
+        lst_network_names = []
+        #for element in root.iter("serverWithState"):
+        #    print("%s - %s" % (element.tag, element.text))
+
+        #for e in root.serverWithState.iterchildren():
+        #    print "%s => %s" % (e.tag, e.text)
+
+        images  = root.findall("//DeployedImageWithSoftwareLabels" ) # find all the groups
+
+        for image in images:
+            if image.name == imagelabel and image.location == cclocation:
+                return image.id
+
+
+        return '65d2a7c4-dfe2-11e2-a7c0-000af700e018'
+
+
     def spawn(self, context, instance, image_meta, network_info,
               block_device_info=None):
 
         LOG.debug('SPAWNING: %s %s %s %s %s' % (context, instance, image_meta, network_info, block_device_info))
+        LOG.debug('SPAWNING NETWORK_INFO:  %s' % vars(network_info))
+        LOG.debug('SPAWNING Network Label:  %s'  % network_info[0]["network"]["label"])
+
+        ccnetworkid = self.fetchNetworkid(network_info[0]["network"]["label"])
+        cctenantid = "e2c43389-90de-4498-b7d0-056e8db0b381"
+        ccimageid = self.fetchImageid('Ubuntu 12.04 2 CPU','AP1')
+        #ccimageid = "65cf01aa-dfe2-11e2-a7c0-000af700e018"
+        ccinstanceadminpwd = "cloudcloudcloud"
+
+        self._update_instance_progress(context, instance,
+                                       step=1,
+                                       total_steps=SPAWN_TOTAL_STEPS)
+
+
         """
         Creates a VM instance.
 
@@ -186,37 +312,6 @@ class VMwareVMOps(object):
 
         """
 
-        from lxml import etree
-        root = etree.Element("Server", xmlns="http://oec.api.opsource.net/schemas/server")
-        itemname = etree.SubElement(root, "name")
-        itemname.text = instance['display_name']
-            #"0fde991d-4fa0-489b-a365-72f7d5ce85bc"
-        itemdescription = etree.SubElement(root, "description")
-        itemdescription.text = ("stackname:%s,stackuuid:%s,stackproject_id:%s,stackimage_ref:%s" % (instance['name'],instance['uuid'], instance['project_id'], instance['image_ref']) )
-        itemvlanResourcePath = etree.SubElement(root, "vlanResourcePath")
-        itemvlanResourcePath.text = "/oec/e2c43389-90de-4498-b7d0-056e8db0b381/network/48359012-a8da-11e2-96ef-000af700e018"
-        itemimageResourcePath = etree.SubElement(root, "imageResourcePath")
-        itemimageResourcePath.text = "/oec/base/image/65cf01aa-dfe2-11e2-a7c0-000af700e018"
-        itemadministratorPassword = etree.SubElement(root, "administratorPassword")
-        itemadministratorPassword.text = "cloudcloudcloud"
-        itemisStarted = etree.SubElement(root, "isStarted")
-        itemisStarted.text = "true"
-        newserverstring = etree.tostring(root, method='xml', encoding="UTF-8", xml_declaration=True)
-
-        LOG.debug('ABOUT TO POST:  %s'  % newserverstring)
-
-
-        import requests
-        s = requests.Session()
-        url = 'https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/server'
-        headers = {'content-type': 'application/xml'}
-        response = s.post(url, data=newserverstring, headers=headers, auth=('dev1-apiuser', 'cloudcloudcloud'))
-        print s.post(url, data=newserverstring, headers=headers, auth=('dev1-apiuser', 'cloudcloudcloud')).text
-        LOG.debug('POSTING:  %s'  % response.text)
-
-        LOG.debug('POST RESPONSE: %s and explain: %s' % (response, response.text))
-
-        LOG.debug(_("Created VM on CloudControl "), instance=instance)
 
         """
         client_factory = self._session._get_vim().client.factory
@@ -246,11 +341,13 @@ class VMwareVMOps(object):
             return (vmdk_file_size_in_kb, os_type, adapter_type, disk_type,
                 vif_model)
 
+        """
         (vmdk_file_size_in_kb, os_type, adapter_type,
             disk_type, vif_model) = _get_image_properties()
 
         vm_folder_ref = self._get_vmfolder_ref()
         res_pool_ref = self._get_res_pool_ref()
+        """
 
         def _get_vif_infos():
             vif_infos = []
@@ -276,22 +373,70 @@ class VMwareVMOps(object):
                                  })
             return vif_infos
 
-        vif_infos = _get_vif_infos()
+        #vif_infos = _get_vif_infos()
 
+        """
         # Get the create vm config spec
         config_spec = vm_util.get_vm_create_spec(
                             client_factory, instance,
                             data_store_name, vif_infos, os_type)
+        """
 
         def _execute_create_vm():
             """Create VM on ESX host."""
             LOG.debug(_("Creating VM on the ESX host"), instance=instance)
+
+            #Prepare DescriptionJson
+            instancedesc = { 'stackname': instance['hostname'], 'stackuuid':instance['uuid'], 'stackproject':instance['project_id'],'stackimage':instance['image_ref']}
+            instancedescjson = json.dumps(instancedesc)
+
+            from lxml import etree
+            root = etree.Element("Server", xmlns="http://oec.api.opsource.net/schemas/server")
+            itemname = etree.SubElement(root, "name")
+            itemname.text = instance['display_name']
+            #"0fde991d-4fa0-489b-a365-72f7d5ce85bc"
+            itemdescription = etree.SubElement(root, "description")
+            itemdescription.text = instancedescjson
+            #("stackname:%s,stackuuid:%s,stackproject_id:%s,stackimage_ref:%s" % (instance['hostname'],instance['uuid'], instance['project_id'], instance['image_ref']) )
+            itemvlanResourcePath = etree.SubElement(root, "vlanResourcePath")
+            itemvlanResourcePath.text = ('/oec/%s/network/%s' % (cctenantid,ccnetworkid))
+            #itemvlanResourcePath.text = "/oec/e2c43389-90de-4498-b7d0-056e8db0b381/network/48359012-a8da-11e2-96ef-000af700e018"
+            itemimageResourcePath = etree.SubElement(root, "imageResourcePath")
+            itemimageResourcePath.text = ("/oec/base/image/%s" % ccimageid)
+            itemadministratorPassword = etree.SubElement(root, "administratorPassword")
+            itemadministratorPassword.text = ccinstanceadminpwd
+            itemisStarted = etree.SubElement(root, "isStarted")
+            itemisStarted.text = "true"
+            newserverstring = etree.tostring(root, method='xml', encoding="UTF-8", xml_declaration=True)
+
+            LOG.debug('ABOUT TO POST:  %s'  % newserverstring)
+
+
+            import requests
+            s = requests.Session()
+            url = 'https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/server'
+            headers = {'content-type': 'application/xml'}
+            response = s.post(url, data=newserverstring, headers=headers, auth=('dev1-apiuser', 'cloudcloudcloud'))
+            #print s.post(url, data=newserverstring, headers=headers, auth=('dev1-apiuser', 'cloudcloudcloud')).text
+            LOG.debug('POSTING:  %s'  % response.text)
+
+            LOG.debug('POST RESPONSE: %s and explain: %s' % (response, response.text))
+
+            LOG.debug(_("Created VM on CloudControl "), instance=instance)
+
+            #instance.task_state = task_states.SPAWNING
+            #instance.save()
+            #instance.vm_state = vm_states.BUILDING
+            #instance.save()
+
+            """
             # Create the VM on the ESX host
             vm_create_task = self._session._call_method(
                                     self._session._get_vim(),
                                     "CreateVM_Task", vm_folder_ref,
                                     config=config_spec, pool=res_pool_ref)
-            self._session._wait_for_task(instance['uuid'], vm_create_task)
+            """
+            self._session._wait_for_task(instance['uuid'], response)
 
             LOG.debug(_("Created VM on the ESX host"), instance=instance)
 
@@ -301,8 +446,10 @@ class VMwareVMOps(object):
         # Set the machine.id parameter of the instance to inject
         # the NIC configuration inside the VM
         if CONF.flat_injected:
-            self._set_machine_id(client_factory, instance, network_info)
+            #self._set_machine_id(client_factory, instance, network_info)
+            pass
 
+        """
         # Set the vnc configuration of the instance, vnc port starts from 5900
         if CONF.vnc_enabled:
             vnc_port = self._get_vnc_port(vm_ref)
@@ -310,7 +457,7 @@ class VMwareVMOps(object):
             self._set_vnc_config(client_factory, instance, vnc_port, vnc_pass)
 
         def _create_virtual_disk():
-            """Create a virtual disk of the size of flat vmdk file."""
+            #Create a virtual disk of the size of flat vmdk file.
             # Create a Virtual Disk of the size of the flat vmdk file. This is
             # done just to generate the meta-data file whose specifics
             # depend on the size of the disk, thin/thick provisioning and the
@@ -366,7 +513,7 @@ class VMwareVMOps(object):
                       instance=instance)
 
         def _fetch_image_on_esx_datastore():
-            """Fetch image from Glance to ESX datastore."""
+            #Fetch image from Glance to ESX datastore.
             LOG.debug(_("Downloading image file data %(image_ref)s to the ESX "
                         "data store %(data_store_name)s") %
                         {'image_ref': instance['image_ref'],
@@ -396,7 +543,7 @@ class VMwareVMOps(object):
                       instance=instance)
 
         def _copy_virtual_disk():
-            """Copy a sparse virtual disk to a thin virtual disk."""
+            #Copy a sparse virtual disk to a thin virtual disk.
             # Copy a sparse virtual disk to a thin virtual disk. This is also
             # done to generate the meta-data file whose specifics
             # depend on the size of the disk, thin/thick provisioning and the
@@ -429,7 +576,9 @@ class VMwareVMOps(object):
                          "disk_type": disk_type,
                          "data_store_name": data_store_name},
                         instance=instance)
+        """
 
+        """
         ebs_root = block_device.volume_in_mapping(
                 self._default_root_device, block_device_info)
 
@@ -498,7 +647,7 @@ class VMwareVMOps(object):
             connection_info = root_disk['connection_info']
             self._volumeops.attach_volume(connection_info, instance['uuid'],
                                           self._default_root_device)
-
+        """
         def _power_on_vm():
             """Power on the VM."""
             LOG.debug(_("Powering on the VM instance"), instance=instance)
@@ -742,6 +891,8 @@ class VMwareVMOps(object):
         2. Un-register a VM.
         3. Delete the contents of the folder holding the VM related data.
         """
+        LOG.warning("DETROY Not Yet Implemented")
+        return
         try:
             vm_ref = vm_util.get_vm_ref(self._session, instance)
             lst_properties = ["config.files.vmPathName", "runtime.powerState"]
@@ -940,7 +1091,62 @@ class VMwareVMOps(object):
             self._session._wait_for_task(instance['uuid'], poweron_task)
             LOG.debug(_("Powered on the VM"), instance=instance)
 
+
+    def fetchCcUuid(self, stackdisplay_name,stackuuid):
+        LOG.info("Fetching stackdisplay_name: %s with stackuuid: %s" % (stackdisplay_name, stackuuid))
+        self._host_ip = CONF.ddcloudapi_host_ip
+        host_username = CONF.ddcloudapi_host_username
+        host_password = CONF.ddcloudapi_host_password
+        api_retry_count = CONF.ddcloudapi_api_retry_count
+        ddservermethodurl = ("https://%s/%s/%s/serverWithState?" % ( CONF.ddcloudapi_host_ip, CONF.ddcloudapi_apistring, CONF.ddcloudapi_orgid))
+        s = requests.Session()
+        response = s.get(ddservermethodurl, auth=(host_username , host_password ))
+        print response.content
+
+        # Namespace stuff
+        DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
+        #DD_NAMESPACE = "http://oec.api.opsource.net/schemas/network"
+        #DD_NAMESPACE = ""
+        NS = "{%s}" % DD_NAMESPACE
+
+
+        # XML Parse Stuff
+        root = objectify.fromstring(response.content)
+        servers  = root.findall("//%sserverWithState" % NS ) # find all the groups
+
+        for server in servers:
+            if server.name == stackdisplay_name:
+                return server.id
+
+        return None
+
+
+
+
     def power_on(self, context, instance, network_info, block_device_info):
+
+        #https://<Cloud API URL>/oec/0.9/{org-id}/server/{server-id}?start
+
+        self._host_ip = CONF.ddcloudapi_host_ip
+        host_username = CONF.ddcloudapi_host_username
+        host_password = CONF.ddcloudapi_host_password
+        api_retry_count = CONF.ddcloudapi_api_retry_count
+        ccuid = self.fetchCcUuid(instance['display_name'],instance['uuid'])
+
+        # Johnathon Test
+        LOG.info("Powering On Server: %s - %s" % (instance['display_name'],instance['uuid']))
+        #self._session = VMwareAPISession(self._host_ip,
+        #                                 host_username, host_password,
+        #                                 api_retry_count, scheme=scheme)
+        ddservermethodurl = ("https://%s/%s/%s/server/%s?start" % ( CONF.ddcloudapi_host_ip, CONF.ddcloudapi_apistring, CONF.ddcloudapi_orgidi,ccuid))
+
+        print ddservermethodurl
+
+        thisreq = requests.Session()
+        response = thisreq.get(ddservermethodurl, auth=(host_username, host_password))
+        LOG.info("response: %s" % response.status_code)
+        #response.content
+
         self._power_on(instance)
 
     def _get_orig_vm_name_label(self, instance):
@@ -1148,11 +1354,118 @@ class VMwareVMOps(object):
                 'num_cpu': num_cpu,
                 'cpu_time': 0}
         """
-        return {'state': power_state.RUNNING,
-                'max_mem': 2147483648,
-                'mem': 2147483648,
-                'num_cpu': 4,
-                'cpu_time': 0}
+
+
+        host_ip = CONF.ddcloudapi_host_ip
+        host_username = CONF.ddcloudapi_host_username
+        host_password = CONF.ddcloudapi_host_password
+        host_url = CONF.ddcloudapi_url
+        s = requests.Session()
+        response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=(host_username , host_password ))
+        #LOG.info("list_instances response: %s" % response.status_code)
+        print response.content
+
+        # Namespace stuff
+        DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
+        #DD_NAMESPACE = "http://oec.api.opsource.net/schemas/network"
+        #DD_NAMESPACE = ""
+        NS = "{%s}" % DD_NAMESPACE
+
+
+        # XML Parse Stuff
+        root = objectify.fromstring(response.content)
+
+        lst_network_names = []
+        #for element in root.iter("serverWithState"):
+        #    print("%s - %s" % (element.tag, element.text))
+
+        #for e in root.serverWithState.iterchildren():
+        #    print "%s => %s" % (e.tag, e.text)
+
+        servers  = root.findall("//%sserverWithState" % NS ) # find all the groups
+        #state = power_state.SHUTDOWN
+        state = 9
+        mem = 9999
+        num_cpu = 50
+        max_mem = 9999
+        cpu_time = 0
+        decoded_serverdesc = ""
+
+
+        LOG.debug("INSTANCE: %s" % vars(instance))
+
+        for server in servers:
+            hasjson = False
+            LOG.debug("INSTANCE COMPARE for %s and %s:" % (server.name, instance['display_name']))
+            privateIp = server.privateIp
+            descriptionstr = str(server.description)
+
+            if server.description == "":
+                continue
+
+            if descriptionstr[0] != "{":
+                LOG.warning("NOT JSON STR: %s" % descriptionstr[0])
+                continue
+
+
+            try:
+                LOG.debug("Seeing if server has JSON: %s : %s" % (server.name,server.description))
+                decoded_serverdesc = json.loads(descriptionstr)
+                decoded_serveruuid = decoded_serverdesc['stackuuid']
+                hasjson = True
+                LOG.debug("zserver.description: %s = %s" % (decoded_serverdesc,descriptionstr))
+                #decoded_serverdesc = json.loads(server.description)
+                LOG.warning("GOING FOR UUID: %s" % decoded_serverdesc['stackuuid'])
+            except TypeError as excep:
+                LOG.warn("%s is not Openstack Instance - No JSON - %s" % (server.name,str(excep) ))
+                continue
+
+            if hasjson and instance['uuid'] == decoded_serveruuid:
+                LOG.debug("INSTANCE UUID MATCH")
+
+            if hasjson and instance['uuid'] == decoded_serveruuid and server.isDeployed == True and server.isStarted == True and server.state == "NORMAL":
+                LOG.info("Instance %s - isDeployed: %s  isStarted: %s  state:  %s" % (instance.display_name,server.isDeployed,server.isStarted,server.state))
+                state = power_state.RUNNING
+                instance._access_ip_v4 = privateIp
+                instance.save()
+                #instance.task_state = ""
+                #instance.save()
+                instance.vm_state = vm_states.ACTIVE
+                instance.save()
+
+
+            if hasjson and instance['uuid'] == decoded_serveruuid and server.isDeployed == True and server.isStarted == False and server.state == "NORMAL":
+                LOG.info("Instance %s - isDeployed: %s  isStarted: %s  state:  %s" % (instance.display_name,server.isDeployed,server.isStarted,server.state))
+                state = power_state.RUNNING
+                #0x04
+                #power_state.SHUTDOWN
+                instance._access_ip_v4 = privateIp
+                instance.save()
+                #instance.task_state = ""
+                #instance.save()
+                instance.vm_state = vm_states.STOPPED
+                #m_states.SUSPENDED
+                instance.save()
+
+
+            if hasjson and server.name == instance.display_name and server.state == "PENDING_ADD":
+                LOG.debug("INSTANCE MATCH for PENDING_ADD: %s and %s" % (server.name, instance.display_name))
+                state = power_state.BUILDING
+                instance.vm_state = vm_states.ACTIVE
+                instance.save()
+                instance.task_state = task_states.SPAWNING
+                instance.save()
+
+
+            mem = server.memoryMb
+            num_cpu = server.cpuCount
+            max_mem = server.memoryMb
+
+        return {'state': state,
+                'max_mem': max_mem,
+                'mem': mem,
+                'num_cpu': num_cpu,
+                'cpu_time': cpu_time}
 
 
     def get_diagnostics(self, instance):
