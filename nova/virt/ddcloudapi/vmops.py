@@ -33,9 +33,14 @@ from lxml import etree, objectify
 import requests
 from netaddr import IPAddress
 
+# For DDAPI
+import requests
+from lxml import etree, objectify
+
 from oslo.config import cfg
 
 from nova import block_device
+from nova.openstack.common import timeutils
 from nova.compute import power_state
 from nova.compute import task_states
 from nova.compute import vm_states
@@ -50,6 +55,7 @@ from nova.virt.ddcloudapi import vif as vmwarevif
 from nova.virt.ddcloudapi import vim_util
 from nova.virt.ddcloudapi import vm_util
 from nova.virt.ddcloudapi import vmware_images
+from nova import compute
 
 
 vmware_vif_opts = [
@@ -78,7 +84,7 @@ VMWARE_PREFIX = 'vmware'
 
 
 RESIZE_TOTAL_STEPS = 4
-SPAWN_TOTAL_STEPS = 11
+SPAWN_TOTAL_STEPS = 13
 
 
 class VMwareVMOps(object):
@@ -166,6 +172,8 @@ class VMwareVMOps(object):
         LOG.debug(_("Got total of %s instances") % str(len(lst_vm_names)))
         return lst_vm_names
 
+
+
     def fetchNetworkid(self, label):
         #https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/networkWithLocation
         """
@@ -179,7 +187,6 @@ class VMwareVMOps(object):
         </ns4:network>
         """
 
-        import requests
         host_ip = CONF.ddcloudapi_host_ip
         host_username = CONF.ddcloudapi_host_username
         host_password = CONF.ddcloudapi_host_password
@@ -285,10 +292,16 @@ class VMwareVMOps(object):
         #ccimageid = "65cf01aa-dfe2-11e2-a7c0-000af700e018"
         ccinstanceadminpwd = "cloudcloudcloud"
 
-        self._update_instance_progress(context, instance,
-                                       step=1,
-                                       total_steps=SPAWN_TOTAL_STEPS)
 
+        ddstate = ""
+        ddaction = ""
+        ddtotalsteps = 0
+        ddstepnumber = 0
+        ddstepname = ""
+
+        #self._update_instance_progress(context, instance,
+        #                               step=1,
+        #                               total_steps=SPAWN_TOTAL_STEPS)
 
         """
         Creates a VM instance.
@@ -659,9 +672,59 @@ class VMwareVMOps(object):
                                "PowerOnVM_Task", vm_ref)
             self._session._wait_for_task(instance['uuid'], power_on_task)
             LOG.debug(_("Powered on the VM instance"), instance=instance)
-        _power_on_vm()
+        #_power_on_vm()
+
+        ddstate = ""
+        ddaction = ""
+        ddtotalsteps = 0
+        ddstepnumber = 0
+        ddstepname = ""
+
+        def _spawnwatch():
+            LOG.warning('---SPAWNWATCH-------------------------------------------------------------------------------------')
+            LOG.warning(_("_spawnwatch - %s "), instance['hostname'])
+
+            building = True
+            while True:
+                ddstates = self.get_info(instance)
+                LOG.debug('SPAWNWATCH - ddstates: %s' % ddstates)
+                if ddstates['ddstate'] != "PENDING_ADD":
+                    break
+                self._update_instance_progress(context, instance,
+                                           step=ddstates['ddstepnumber'],
+                                           total_steps=ddstates['ddtotalsteps'])
+                stepsminusone = ddstates['ddtotalsteps'] - 1
+                if ddstates['ddstepnumber'] == stepsminusone:
+                    break
+                time.sleep(10)
+
+            LOG.warning('---SPAWNWATCH DONE-------------------------------------------------------------------------------------')
+
+        ddstatestring = "PENDING_ADD"
+        self._session._wait_for_task(instance['uuid'], self.ddstatewatch(instance, ddstatestring))
+        #self._session._wait_for_task(instance['uuid'], _spawnwatch())
+
+
+    def ddstatewatch(self, instance, ddstatestring):
+        LOG.warning('---DDSTATE-WATCH----%s------------------------------------------------------------------------------' % instance['hostname'])
+
+        while True:
+            ddstates = self.get_info(instance)
+            LOG.info('DDSTATEWATCH - ddstates: %s' % ddstates)
+            if ddstates['ddstate'] != ddstatestring:
+                break
+            self._update_instance_progress(context, instance,
+                                       step=ddstates['ddstepnumber'],
+                                       total_steps=ddstates['ddtotalsteps'])
+            if ddstates['ddstepnumber'] == ddstates['ddtotalsteps']:
+                break
+            time.sleep(10)
+
+        LOG.warning('---DDSTATE-WATCH-COMPLETE---%s----------------------------------------------------------------------' % instance['hostname'])
 
     def snapshot(self, context, instance, snapshot_name, update_task_state):
+        LOG.warning('NOT YET IMPLEMENTED - snapshot')
+        return
         """Create snapshot from a running VM instance.
 
         Steps followed are:
@@ -820,6 +883,8 @@ class VMwareVMOps(object):
         _clean_temp_data()
 
     def reboot(self, instance, network_info):
+        LOG.warning('NOT YET IMPLEMENTED - reboot')
+        return
         """Reboot a VM instance."""
         vm_ref = vm_util.get_vm_ref(self._session, instance)
         self.plug_vifs(instance, network_info)
@@ -862,6 +927,8 @@ class VMwareVMOps(object):
             LOG.debug(_("Did hard reboot of VM"), instance=instance)
 
     def _delete(self, instance, network_info):
+        LOG.warning('NOT YET IMPLEMENTED - _delete')
+        return
         """
         Destroy a VM instance. Steps followed are:
         1. Power off the VM, if it is in poweredOn state.
@@ -887,6 +954,75 @@ class VMwareVMOps(object):
             LOG.exception(exc, instance=instance)
 
     def destroy(self, instance, network_info, destroy_disks=True):
+        LOG.warning('NOT YET IMPLEMENTED - destroy')
+        #return
+        host = instance['host']
+        az_name = instance['availability_zone']
+        project_id = instance['project_id']
+        ddorgid = ""
+        ddorgname = ""
+        ddusername = ""
+        ddpassword = ""
+        apiver = ""
+        location = ""
+        apihostname = ""
+        geo = ""
+        #(self, stackdisplay_name,stackuuid):
+        destroytargetid = self.fetchCcUuid(instance['display_name'],instance['uuid'])
+
+        LOG.warning('----DESTROY-----------------------------------------------------------------------------------------------------------')
+        # Fetch AZ and AGG details from nova
+        ctxt = context.get_admin_context()
+        aggregates = self._virtapi.aggregate_get_by_host(
+                        ctxt, host, key=None)
+        LOG.warning('AGGREGATES FOR THIS HOST: %s' % aggregates)
+
+        for agg in aggregates:
+            meta = agg['metadetails']
+            print('%s:%s' % (agg['name'],meta['filter_tenant_id']))
+            if project_id == meta['filter_tenant_id']:
+                ddorgid = meta['ddorgid']
+                ddorgname = meta['ddorgname']
+                ddusername = meta['ddusername']
+                ddpassword = meta['ddpassword']
+                apiver = meta['apiver']
+                location = meta['location']
+                apihostname = meta['apihostname']
+                geo = meta['geo']
+
+
+        #aggregatemeta = self._virtapi.aggregate_metadata_get_by_host(ctxt, host, key=None)
+
+        """
+        aggs = self._virtapi.aggregate_get_all(ctxt)
+        for agg in aggs:
+            print('%s:%s' % (agg['name'],agg['project_id']))
+
+        key = "project_id"
+        key = {'project_id': project_id}
+        agghost = self._virtapi.aggregate_host_get_by_metadata_key(ctxt, key)
+        LOG.warning(agghost)
+
+        aggregate_host_get_by_metadata_key
+        # Get all aggs
+        allaggs = self._virtapi.aggregate_get_all(ctxt)
+        LOG.warning(allaggs)
+        """
+        # Exception if we got nothing
+        if not aggregates:
+                        msg = ('Aggregate for host %(host)s count not be'
+                                ' found.') % dict(host=host)
+                        raise exception.NotFound(msg)
+
+        host_url = str('https://%s/oec/%s/%s/server/%s?delete' % (apihostname,apiver,ddorgid,destroytargetid))
+        s = requests.Session()
+        response = s.get(host_url, auth=(ddusername , ddpassword ))
+        #LOG.info("list_instances response: %s" % response.status_code)
+        print response.content
+
+        LOG.warning('----DESTROYED!-----------------------------------------------------------------------------------------------------------')
+        return
+
         """
         Destroy a VM instance. Steps followed are:
         1. Power off the VM, if it is in poweredOn state.
@@ -974,6 +1110,8 @@ class VMwareVMOps(object):
         raise NotImplementedError(msg)
 
     def suspend(self, instance):
+        LOG.warning('NOT YET IMPLEMENTED - suspend')
+        return
         """Suspend the specified instance."""
         vm_ref = vm_util.get_vm_ref(self._session, instance)
         pwr_state = self._session._call_method(vim_util,
@@ -995,6 +1133,8 @@ class VMwareVMOps(object):
                       "without doing anything"), instance=instance)
 
     def resume(self, instance):
+        LOG.warning('NOT YET IMPLEMENTED - resume')
+        return
         """Resume the specified instance."""
         vm_ref = vm_util.get_vm_ref(self._session, instance)
         pwr_state = self._session._call_method(vim_util,
@@ -1012,6 +1152,8 @@ class VMwareVMOps(object):
             raise exception.InstanceResumeFailure(reason=reason)
 
     def rescue(self, context, instance, network_info, image_meta):
+        LOG.warning('NOT YET IMPLEMENTED - rescue')
+        return
         """Rescue the specified instance.
 
             - shutdown the instance VM.
@@ -1044,6 +1186,8 @@ class VMwareVMOps(object):
                                 unit_number=unit_number)
 
     def unrescue(self, instance):
+        LOG.warning('NOT YET IMPLEMENTED - unrescue')
+        return
         """Unrescue the specified instance."""
         instance_orig_name = instance['name']
         instance['name'] = instance['name'] + self._rescue_suffix
@@ -1052,6 +1196,8 @@ class VMwareVMOps(object):
         self._power_on(instance)
 
     def power_off(self, instance):
+        LOG.warning('NOT YET IMPLEMENTED - power_off')
+        return
         """Power off the specified instance."""
         vm_ref = vm_util.get_vm_ref(self._session, instance)
 
@@ -1075,6 +1221,8 @@ class VMwareVMOps(object):
                         "without doing anything"), instance=instance)
 
     def _power_on(self, instance):
+        LOG.warning('NOT YET IMPLEMENTED - _power_on')
+        return
         """Power on the specified instance."""
         vm_ref = vm_util.get_vm_ref(self._session, instance)
 
@@ -1092,7 +1240,6 @@ class VMwareVMOps(object):
                                         "PowerOnVM_Task", vm_ref)
             self._session._wait_for_task(instance['uuid'], poweron_task)
             LOG.debug(_("Powered on the VM"), instance=instance)
-
 
     def fetchCcUuid(self, stackdisplay_name,stackuuid):
         LOG.info("Fetching stackdisplay_name: %s with stackuuid: %s" % (stackdisplay_name, stackuuid))
@@ -1118,12 +1265,9 @@ class VMwareVMOps(object):
 
         for server in servers:
             if server.name == stackdisplay_name:
-                return server.id
+                return server.attrib['id']
 
         return None
-
-
-
 
     def power_on(self, context, instance, network_info, block_device_info):
 
@@ -1175,6 +1319,8 @@ class VMwareVMOps(object):
 
     def migrate_disk_and_power_off(self, context, instance, dest,
                                    instance_type):
+        LOG.warning('NOT YET IMPLEMENTED - migrate_disk_and_power_off')
+        return
         """
         Transfers the disk of a running instance in multiple phases, turning
         off the instance before the end.
@@ -1232,6 +1378,8 @@ class VMwareVMOps(object):
                                        total_steps=RESIZE_TOTAL_STEPS)
 
     def confirm_migration(self, migration, instance, network_info):
+        LOG.warning('NOT YET IMPLEMENTED - confirm_migration')
+        return
         """Confirms a resize, destroying the source VM."""
         instance_name = self._get_orig_vm_name_label(instance)
         # Destroy the original VM.
@@ -1258,6 +1406,8 @@ class VMwareVMOps(object):
 
     def finish_revert_migration(self, instance, network_info,
                                 block_device_info, power_on=True):
+        LOG.warning('NOT YET IMPLEMENTED - finish_revert_migration')
+        return
         """Finish reverting a resize."""
         # The original vm was suffixed with '-orig'; find it using
         # the old suffix, remove the suffix, then power it back on.
@@ -1280,6 +1430,8 @@ class VMwareVMOps(object):
     def finish_migration(self, context, migration, instance, disk_info,
                          network_info, image_meta, resize_instance=False,
                          block_device_info=None, power_on=True):
+        LOG.warning('NOT YET IMPLEMENTED - finish_migration')
+        return
         """Completes a resize, turning on the migrated instance."""
         # 4. Start VM
         if power_on:
@@ -1290,6 +1442,8 @@ class VMwareVMOps(object):
 
     def live_migration(self, context, instance_ref, dest,
                        post_method, recover_method, block_migration=False):
+        LOG.warning('NOT YET IMPLEMENTED - live_migration')
+        return
         """Spawning live_migration operation for distributing high-load."""
         vm_ref = vm_util.get_vm_ref(self._session, instance_ref)
 
@@ -1312,6 +1466,8 @@ class VMwareVMOps(object):
         LOG.debug(_("Migrated VM to host %s") % dest, instance=instance_ref)
 
     def poll_rebooting_instances(self, timeout, instances):
+        LOG.warning('NOT YET IMPLEMENTED - poll_reboot_instances')
+        return
         """Poll for rebooting instances."""
         ctxt = nova_context.get_admin_context()
 
@@ -1361,36 +1517,65 @@ class VMwareVMOps(object):
         project_id = instance['project_id']
         host = instance['host']
 
+        #{u'ddpassword': u'Sma11ta1k', u'availability_zone': u'Tokyo MCP', u'ddorgid': u'e2c43389-90de-4498-b7d0-056e8db0b381', u'apiver': u'0.9', u'location': u'AP1', u'apihostname': u'api-ap.dimensiondata.com', u'ddusername': u'Johnathon.Meichtry-AP-Z000002-CBU-Dev1', u'project_id': u'cd2407e2994c4557891fb9df175957fe', u'geo': u'AP', u'ddorgname': u'AP-Z000002-Dimension Data Asia Pacific-OHQ-CBU-Dev1'}
+
+        ddorgid = ""
+        ddorgname = ""
+        ddusername = ""
+        ddpassword = ""
+        apiver = ""
+        location = ""
+        apihostname = ""
+        geo = ""
 
         LOG.warning('---------------------------------------------------------------------------------------------------------------')
         # Fetch AZ and AGG details from nova
         ctxt = context.get_admin_context()
-        aggregate = self._virtapi.aggregate_get_by_host(
+        aggregates = self._virtapi.aggregate_get_by_host(
                         ctxt, host, key=None)
-        LOG.warning(aggregate)
+        LOG.warning('AGGREGATES FOR THIS HOST: %s' % aggregates)
+
+        for agg in aggregates:
+            meta = agg['metadetails']
+            print('%s:%s' % (agg['name'],meta['filter_tenant_id']))
+            if project_id == meta['filter_tenant_id']:
+                ddorgid = meta['ddorgid']
+                ddorgname = meta['ddorgname']
+                ddusername = meta['ddusername']
+                ddpassword = meta['ddpassword']
+                apiver = meta['apiver']
+                location = meta['location']
+                apihostname = meta['apihostname']
+                geo = meta['geo']
+
+
+        #aggregatemeta = self._virtapi.aggregate_metadata_get_by_host(ctxt, host, key=None)
+
+        """
+        aggs = self._virtapi.aggregate_get_all(ctxt)
+        for agg in aggs:
+            print('%s:%s' % (agg['name'],agg['project_id']))
 
         key = "project_id"
         key = {'project_id': project_id}
         agghost = self._virtapi.aggregate_host_get_by_metadata_key(ctxt, key)
         LOG.warning(agghost)
 
+        aggregate_host_get_by_metadata_key
         # Get all aggs
         allaggs = self._virtapi.aggregate_get_all(ctxt)
         LOG.warning(allaggs)
-
+        """
         # Exception if we got nothing
-        if not aggregate:
+        if not aggregates:
                         msg = ('Aggregate for host %(host)s count not be'
                                 ' found.') % dict(host=host)
                         raise exception.NotFound(msg)
 
         LOG.warning('---------------------------------------------------------------------------------------------------------------')
-        host_ip = CONF.ddcloudapi_host_ip
-        host_username = CONF.ddcloudapi_host_username
-        host_password = CONF.ddcloudapi_host_password
-        host_url = CONF.ddcloudapi_url
+        host_url = str('https://%s/oec/%s/%s/serverWithState?' % (apihostname,apiver,ddorgid))
         s = requests.Session()
-        response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=(host_username , host_password ))
+        response = s.get(host_url, auth=(ddusername , ddpassword ))
         #LOG.info("list_instances response: %s" % response.status_code)
         print response.content
 
@@ -1419,9 +1604,14 @@ class VMwareVMOps(object):
         max_mem = 9999
         cpu_time = 0
         decoded_serverdesc = ""
+        ddstate = ""
+        ddaction = ""
+        ddtotalsteps = 0
+        ddstepnumber = 0
+        ddstepname = ""
 
 
-        LOG.debug("INSTANCE: %s" % vars(instance))
+        #LOG.debug("INSTANCE: %s" % vars(instance))
 
         for server in servers:
             hasjson = False
@@ -1434,7 +1624,7 @@ class VMwareVMOps(object):
                 continue
 
             if descriptionstr[0] != "{":
-                LOG.warning("NOT JSON STR: %s" % descriptionstr[0])
+                LOG.warning("IS NOT JSON STR: %s" % descriptionstr[0])
                 continue
 
 
@@ -1454,28 +1644,33 @@ class VMwareVMOps(object):
                 LOG.debug("INSTANCE UUID MATCH")
 
             if hasjson and instance['uuid'] == decoded_serveruuid and server.isDeployed == True and server.isStarted == True and server.state == "NORMAL":
-                LOG.info("Instance %s - isDeployed: %s  isStarted: %s  state:  %s" % (instance.display_name,server.isDeployed,server.isStarted,server.state))
+                LOG.info("Instance %s - isDeployed: %s  isStarted: %s  state:  %s" % (instance['display_name'],server.isDeployed,server.isStarted,server.state))
                 state = power_state.RUNNING
-
+                """
                 instance.access_ip_v4 = privateIp
                 instance.save()
-                #instance.task_state = ""
-                #instance.save()
-                instance.vm_state = vm_states.ACTIVE
-                instance.save()
-
+                instance['power_state'] = power_state.RUNNING
+                instance['task_state'] = None
+                instance['vm_state'] = vm_states.ACTIVE
+                instance.save(expected_task_state=(None,task_states.SPAWNING,task_states.POWERING_OFF,
+                                                   task_states.STOPPING))
+                #state = power_state.SHUTDOWN
+                """
 
             if hasjson and instance['uuid'] == decoded_serveruuid and server.isDeployed == True and server.isStarted == False and server.state == "NORMAL":
-                LOG.info("Instance %s - isDeployed: %s  isStarted: %s  state:  %s" % (instance.display_name,server.isDeployed,server.isStarted,server.state))
-
+                LOG.info("NORMAL & RUNNING - Instance %s - isDeployed: %s  isStarted: %s  state:  %s" % (instance.display_name,server.isDeployed,server.isStarted,server.state))
+                print vars(instance)
+                state = power_state.SHUTDOWN
                 """
-                update_data = dict(power_state=current_power_state,
-                           vm_state=vm_states.ACTIVE,
-                           task_state=None,
-                           expected_task_state=task_states.SPAWNING,
-                           launched_at=timeutils.utcnow())
-                update_data['access_ip_v4'] = ip['address']
-                self._instance_update(context, instance['uuid'],
+                ctxt = nova_context.get_admin_context()
+                update_data = dict(power_state=power_state.RUNNING,
+                           _vm_state=vm_states.ACTIVE,
+                           _task_state=None)
+                           #expected_task_state=(None,task_states.SPAWNING,task_states.POWERING_OFF,task_states.STOPPING),
+                           #_launched_at=timeutils.utcnow())
+                #update_data['_access_ip_v4'] = server.privateIp
+                #instance_update(self, context, instance_uuid, updates)
+                self._virtapi.instance_update(ctxt, instance['uuid'],
                                              **update_data)
                 """
 
@@ -1484,19 +1679,16 @@ class VMwareVMOps(object):
                 #instance['task_state']
                 #instance['vm_state']
                 LOG.warning("Existing THREE States are: %s : %s : %s" % (instance['power_state'],instance['task_state'],instance['vm_state']))
+                """
                 instance['power_state'] = power_state.SHUTDOWN
                 instance['task_state'] = None
                 instance['vm_state'] = vm_states.STOPPED
                 instance.save(expected_task_state=(None,task_states.SPAWNING,task_states.POWERING_OFF,
                                                    task_states.STOPPING))
-
-                state = power_state.SHUTDOWN
+                """
                 #state = power_state.NOSTATE
-
-                instance.access_ip_v4 = privateIp
-                instance.save()
-
-
+                #instance['access_ip_v4'] = privateIp
+                #instance.save()
                 """
                 instance.power_state = power_state.NOSTATE
                 instance.save
@@ -1508,14 +1700,30 @@ class VMwareVMOps(object):
                 """
 
 
-            if hasjson and server.name == instance.display_name and server.state == "PENDING_ADD":
-                LOG.debug("INSTANCE MATCH for PENDING_ADD: %s and %s" % (server.name, instance.display_name))
-                state = power_state.BUILDING
-                instance.vm_state = vm_states.ACTIVE
+            if hasjson and server.name == instance['display_name'] and server.state == "PENDING_ADD":
+                LOG.warning("PENDING_ADD - INSTANCE MATCH for PENDING_ADD: %s and %s" % (server['name'], instance['display_name']))
+                state = power_state.RUNNING
+                ddstate = server.state
+                ddaction = server.status.action
+                ddtotalsteps = server.status.numberOfSteps
+                ddstepnumber = server.status.step.number
+                ddstepname = server.status.step.name
+                """
+                instance['vm_state'] = vm_states.ACTIVE
                 instance.save()
-                instance.task_state = task_states.SPAWNING
+                instance['task_state'] = task_states.SPAWNING
                 instance.save()
+                """
 
+            if hasjson and server.name == instance['display_name'] and server.state == "FAILED_ADD":
+                LOG.warning("FAILED_ADD - INSTANCE MATCH for PENDING_ADD: %s and %s" % (server['name'], instance['display_name']))
+                state = power_state.RUNNING
+                """
+                instance['vm_state'] = vm_states.ERROR
+                instance.save()
+                instance['task_state'] = task_states.SPAWNING
+                instance.save()
+                """
 
             mem = server.memoryMb
             num_cpu = server.cpuCount
@@ -1525,7 +1733,12 @@ class VMwareVMOps(object):
                 'max_mem': max_mem,
                 'mem': mem,
                 'num_cpu': num_cpu,
-                'cpu_time': cpu_time}
+                'cpu_time': cpu_time,
+                'ddstate': ddstate,
+                'ddaction': ddaction,
+                'ddtotalsteps': ddtotalsteps,
+                'ddstepnumber': ddstepnumber,
+                'ddstepname': ddstepname}
 
 
     def get_diagnostics(self, instance):
@@ -1534,6 +1747,8 @@ class VMwareVMOps(object):
         raise NotImplementedError(msg)
 
     def get_console_output(self, instance):
+        LOG.warning('NOT YET IMPLEMENTED - get_console_output')
+        return "DDCloud does not support console"
         """Return snapshot of console."""
         vm_ref = vm_util.get_vm_ref(self._session, instance)
 
@@ -1554,6 +1769,8 @@ class VMwareVMOps(object):
             return ""
 
     def get_vnc_console(self, instance):
+        LOG.warning('NOT YET IMPLEMENTED - get_vnc_console')
+        return
         """Return connection info for a vnc console."""
         vm_ref = vm_util.get_vm_ref(self._session, instance)
 
@@ -1562,6 +1779,8 @@ class VMwareVMOps(object):
                 'internal_access_path': None}
 
     def get_vnc_console_vcenter(self, instance):
+        LOG.warning('NOT YET IMPLEMENTED - get_vnc_console_vcenter')
+        return
         """Return connection info for a vnc console using vCenter logic."""
 
         # vCenter does not run virtual machines and does not run
@@ -1617,6 +1836,8 @@ class VMwareVMOps(object):
         return machine_id_str
 
     def _set_machine_id(self, client_factory, instance, network_info):
+        LOG.warning('NOT YET IMPLEMENTED - _set_machine_id')
+        return
         """
         Set the machine id of the VM for guest tools to pick up and reconfigure
         the network interfaces.
@@ -1637,6 +1858,8 @@ class VMwareVMOps(object):
                   instance=instance)
 
     def _set_vnc_config(self, client_factory, instance, port, password):
+        LOG.warning('NOT YET IMPLEMENTED - _set_vnc_config')
+        return
         """
         Set the vnc configuration of the VM.
         """
@@ -1657,12 +1880,16 @@ class VMwareVMOps(object):
                   instance=instance)
 
     def _get_datacenter_ref_and_name(self):
+        LOG.warning('NOT YET IMPLEMENTED - _get_datacenter_ref_and_name')
+        return None
         """Get the datacenter name and the reference."""
         dc_obj = self._session._call_method(vim_util, "get_objects",
                 "Datacenter", ["name"])
         return dc_obj[0].obj, dc_obj[0].propSet[0].val
 
     def _get_host_ref_from_name(self, host_name):
+        LOG.warning('NOT YET IMPLEMENTED - _get_host_ref_from_name')
+        return None
         """Get reference to the host with the name specified."""
         host_objs = self._session._call_method(vim_util, "get_objects",
                     "HostSystem", ["name"])
@@ -1672,6 +1899,8 @@ class VMwareVMOps(object):
         return None
 
     def _get_vmfolder_ref(self):
+        LOG.warning('NOT YET IMPLEMENTED - _get_vmfolder_ref')
+        return
         """Get the Vm folder ref from the datacenter."""
         """
         dc_objs = self._session._call_method(vim_util, "get_objects",
@@ -1683,6 +1912,8 @@ class VMwareVMOps(object):
         return vm_folder_ref
 
     def _get_res_pool_ref(self):
+        LOG.warning('NOT YET IMPLEMENTED - _get_res_pool_ref')
+        return
         # Get the resource pool. Taking the first resource pool coming our
         # way. Assuming that is the default resource pool.
         if self._cluster is None:
@@ -1697,6 +1928,8 @@ class VMwareVMOps(object):
         return res_pool_ref
 
     def _path_exists(self, ds_browser, ds_path):
+        LOG.warning('NOT YET IMPLEMENTED - _path_exists')
+        return True
         """Check if the path exists on the datastore."""
         search_task = self._session._call_method(self._session._get_vim(),
                                    "SearchDatastore_Task",
@@ -1743,6 +1976,8 @@ class VMwareVMOps(object):
         return True, file_exists
 
     def _mkdir(self, ds_path):
+        LOG.warning('NOT YET IMPLEMENTED - _mkdir')
+        return
         """
         Creates a directory at the path specified. If it is just "NAME",
         then a directory with this name is created at the topmost level of the
@@ -1758,6 +1993,8 @@ class VMwareVMOps(object):
 
     def _check_if_folder_file_exists(self, ds_ref, ds_name,
                                      folder_name, file_name):
+        LOG.warning('NOT YET IMPLEMENTED - _check_if_folder_file_exists')
+        return
         ds_browser = vim_util.get_dynamic_property(
                                 self._session._get_vim(),
                                 ds_ref,
@@ -1775,6 +2012,8 @@ class VMwareVMOps(object):
         return file_exists
 
     def inject_network_info(self, instance, network_info):
+        LOG.warning('NOT YET IMPLEMENTED - inject_network_info')
+        return
         """inject network info for specified instance."""
         # Set the machine.id parameter of the instance to inject
         # the NIC configuration inside the VM
