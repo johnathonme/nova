@@ -42,6 +42,7 @@ from nova.compute import vm_states
 from nova import conductor
 from nova import context as nova_context
 from nova import exception
+from nova import context
 from nova.openstack.common import excutils
 from nova.openstack.common import log as logging
 from nova.virt import driver
@@ -1355,8 +1356,35 @@ class VMwareVMOps(object):
                 'num_cpu': num_cpu,
                 'cpu_time': 0}
         """
+        # Get we need from the instance
+        az_name = instance['availability_zone']
+        project_id = instance['project_id']
+        host = instance['host']
 
 
+        LOG.warning('---------------------------------------------------------------------------------------------------------------')
+        # Fetch AZ and AGG details from nova
+        ctxt = context.get_admin_context()
+        aggregate = self._virtapi.aggregate_get_by_host(
+                        ctxt, host, key=None)
+        LOG.warning(aggregate)
+
+        key = "project_id"
+        key = {'project_id': project_id}
+        agghost = self._virtapi.aggregate_host_get_by_metadata_key(ctxt, key)
+        LOG.warning(agghost)
+
+        # Get all aggs
+        allaggs = self._virtapi.aggregate_get_all(ctxt)
+        LOG.warning(allaggs)
+
+        # Exception if we got nothing
+        if not aggregate:
+                        msg = ('Aggregate for host %(host)s count not be'
+                                ' found.') % dict(host=host)
+                        raise exception.NotFound(msg)
+
+        LOG.warning('---------------------------------------------------------------------------------------------------------------')
         host_ip = CONF.ddcloudapi_host_ip
         host_username = CONF.ddcloudapi_host_username
         host_password = CONF.ddcloudapi_host_password
