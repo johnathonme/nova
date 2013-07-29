@@ -171,7 +171,6 @@ class VMwareESXDriver(driver.ComputeDriver):
     def spawn(self, context, instance, image_meta, injected_files,
               admin_password, network_info=None, block_device_info=None):
         """Create VM instance."""
-        LOG.debug('SPAWNING: %s %s %s %s %s %s %s' % (context, instance, image_meta, injected_files, admin_password, network_info, block_device_info))
         self._vmops.spawn(context, instance, image_meta, network_info,
                           block_device_info)
 
