@@ -907,6 +907,8 @@ class VMwareAPISession(object):
         Poll the given task, and fires the given Deferred if we
         get a result.
         """
+        self._vmops.ddstatewatch(instance_uuid, task_ref, 5)
+
         done.send("success")
         return
         try:

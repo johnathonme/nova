@@ -36,6 +36,8 @@ from netaddr import IPAddress
 # For DDAPI
 import requests
 from lxml import etree, objectify
+from eventlet import event
+from nova.openstack.common import loopingcall
 
 from oslo.config import cfg
 
@@ -121,7 +123,7 @@ class VMwareVMOps(object):
         response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/serverWithState?', auth=(host_username , host_password ))
         #LOG.info("list_instances response: %s" % response.status_code)
 
-        print response.content
+        #print response.content
 
         # Namespace stuff
         DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
@@ -195,7 +197,7 @@ class VMwareVMOps(object):
         response = s.get('https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/networkWithLocation', auth=(host_username , host_password ))
         #LOG.info("list_instances response: %s" % response.status_code)
 
-        print response.content
+        #print response.content
 
         # Namespace stuff
         DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
@@ -249,7 +251,7 @@ class VMwareVMOps(object):
         response = s.get(fetchurl, auth=(host_username , host_password ))
         #LOG.info("list_instances response: %s" % response.status_code)
 
-        print response.content
+        #print response.content
 
         # Namespace stuff
         DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
@@ -451,7 +453,6 @@ class VMwareVMOps(object):
                                     "CreateVM_Task", vm_folder_ref,
                                     config=config_spec, pool=res_pool_ref)
             """
-            self._session._wait_for_task(instance['uuid'], response)
 
             LOG.debug(_("Created VM on the ESX host"), instance=instance)
 
@@ -680,27 +681,67 @@ class VMwareVMOps(object):
         ddstepnumber = 0
         ddstepname = ""
 
+        #return
         ddstatestring = "PENDING_ADD"
-        self._session._wait_for_task(instance['uuid'], self.ddstatewatch(instance, ddstatestring, 10))
+        self._wait_for_task(instance, ddstatestring)
+
+        ddstatestring = "NORMAL"
+        self._wait_for_task(instance, ddstatestring)
+
+
+
+
         #self._session._wait_for_task(instance['uuid'], _spawnwatch())
 
 
     def ddstatewatch(self, instance, ddstatestring, sleepsecs):
-        LOG.warning('---DDSTATE-WATCH----%s------------------------------------------------------------------------------' % instance['hostname'])
+        LOG.warning('---DDSTATE-WATCH----%s------------------------------------------------' % instance['hostname'])
+        ctxt = context.get_admin_context()
+        time.sleep(10)
 
         while True:
             ddstates = self.get_info(instance)
-            LOG.info('DDSTATEWATCH - ddstates: %s' % ddstates)
+            LOG.warning('DDSTATEWATCH - ddstates: %s' % ddstates)
+
+            if ddstates['ddstate'] == "NORMAL" and ddstates['ddaction'] == "anyaction":
+                break
+
             if ddstates['ddstate'] != ddstatestring:
                 break
-            self._update_instance_progress(context, instance,
+
+            if not ddstates['ddhasstep'] and ddstates['ddstate'] == ddstatestring:
+                self._update_instance_progress(ctxt, instance,
+                                       step=1,
+                                       total_steps=1)
+                time.sleep(sleepsecs)
+                ddstates = self.get_info(instance)
+                continue
+
+            if ddstates['ddhasstep']:
+                self._update_instance_progress(ctxt, instance,
                                        step=ddstates['ddstepnumber'],
                                        total_steps=ddstates['ddtotalsteps'])
-            if ddstates['ddstepnumber'] == ddstates['ddtotalsteps']:
-                break
-            time.sleep(sleepsecs)
+                time.sleep(sleepsecs)
+                pass
 
-        LOG.warning('---DDSTATE-WATCH-COMPLETE---%s----------------------------------------------------------------------' % instance['hostname'])
+            if ddstates['ddstepnumber'] == ddstates['ddtotalsteps']:
+                self._update_instance_progress(ctxt, instance,
+                                       step=ddstates['ddstepnumber'],
+                                       total_steps=ddstates['ddtotalsteps'])
+                break
+
+
+
+            if ddstates['ddstate'] == "":
+                time.sleep(5)
+                continue
+
+        self._update_instance_progress(ctxt, instance,
+                                       step=1,
+                                       total_steps=1)
+
+        LOG.warning('---DDSTATE-WATCH-COMPLETE---%s-------------------------------------------------' % instance['hostname'])
+        LOG.info('DDSTATEWATCH - End ddstates: %s' % ddstates)
 
     def snapshot(self, context, instance, snapshot_name, update_task_state):
         LOG.warning('NOT YET IMPLEMENTED - snapshot')
@@ -873,7 +914,7 @@ class VMwareVMOps(object):
 
         ddstatestring = "PENDING_CHANGE"
         ddactionstring = "REBOOT_SERVER"
-        self._session._wait_for_task(instance['uuid'], self.ddstatewatch(instance, ddstatestring, 1))
+        self._wait_for_task(instance, ddstatestring)
 
         LOG.warning('IN DEV  - reboot')
         return
@@ -937,11 +978,11 @@ class VMwareVMOps(object):
         ctxt = context.get_admin_context()
         aggregates = self._virtapi.aggregate_get_by_host(
                         ctxt, host, key=None)
-        LOG.debug('AGGREGATES FOR THIS HOST: %s' % aggregates)
+        #LOG.debug('AGGREGATES FOR THIS HOST: %s' % aggregates)
 
         for agg in aggregates:
             meta = agg['metadetails']
-            print('%s:%s' % (agg['name'],meta['filter_tenant_id']))
+            #print('%s:%s' % (agg['name'],meta['filter_tenant_id']))
             if project_id == meta['filter_tenant_id']:
                 ddorgid = meta['ddorgid']
                 ddorgname = meta['ddorgname']
@@ -1030,6 +1071,13 @@ class VMwareVMOps(object):
                                 ' found.') % dict(host=host)
                         raise exception.NotFound(msg)
         """
+
+        # Emergency Terminate
+        ddstates = self.get_info(instance)
+        if not ddstates['ccexists']:
+            return
+
+        # Terminate Procedure Proper
         apihostname, apiver, ddorgid, targetid, ddusername, ddpassword, location = self.ddpreconnect_withinstance(instance)
         host_url = str('https://%s/oec/%s/%s/server/%s?delete' % (apihostname,apiver,ddorgid,targetid))
         s = requests.Session()
@@ -1037,7 +1085,8 @@ class VMwareVMOps(object):
         LOG.debug('Action Response: %s - %s' % (response.status_code,response.content))
 
         ddstatestring = "PENDING_DELETE"
-        self._session._wait_for_task(instance['uuid'], self.ddstatewatch(instance, ddstatestring, 1))
+        #self.ddstatewatch(instance, ddstatestring, 1)
+        self._wait_for_task(instance, ddstatestring)
 
         LOG.warning('----DESTROYED!-----%s----------------------------------------------------------------------------------------------------' % instance['display_name'])
         return
@@ -1127,7 +1176,19 @@ class VMwareVMOps(object):
         raise NotImplementedError(msg)
 
     def suspend(self, instance):
-        LOG.warning('NOT YET IMPLEMENTED - suspend')
+        apihostname, apiver, ddorgid, targetid, ddusername, ddpassword, location = self.ddpreconnect_withinstance(instance)
+        host_url = str('https://%s/oec/%s/%s/server/%s?shutdown' % (apihostname,apiver,ddorgid,targetid))
+        s = requests.Session()
+        response = s.get(host_url, auth=(ddusername , ddpassword ))
+        LOG.debug('Action Response: %s - %s' % (response.status_code,response.content))
+
+        ddstatestring = "PENDING_CHANGE"
+        ddactionstring = "POWER_OFF_SERVER"
+        #self._session._wait_for_task(instance['uuid'], self.ddstatewatch(instance, ddstatestring, 1))
+        self._wait_for_task(instance, ddstatestring)
+
+
+        LOG.warning('IN DEV - suspend')
         return
         """Suspend the specified instance."""
         vm_ref = vm_util.get_vm_ref(self._session, instance)
@@ -1150,7 +1211,18 @@ class VMwareVMOps(object):
                       "without doing anything"), instance=instance)
 
     def resume(self, instance):
-        LOG.warning('NOT YET IMPLEMENTED - resume')
+
+        apihostname, apiver, ddorgid, targetid, ddusername, ddpassword, location  = self.ddpreconnect_withinstance(instance)
+        host_url = str('https://%s/oec/%s/%s/server/%s?start' % (apihostname,apiver,ddorgid,targetid))
+        s = requests.Session()
+        response = s.get(host_url, auth=(ddusername , ddpassword ))
+        LOG.debug('Action Response: %s - %s' % (response.status_code,response.content))
+
+        ddstatestring = "PENDING_CHANGE"
+        ddactionstring = "START_SERVER"
+        self._wait_for_task(instance, ddstatestring)
+
+        LOG.warning('IN DEV - resume')
         return
         """Resume the specified instance."""
         vm_ref = vm_util.get_vm_ref(self._session, instance)
@@ -1222,7 +1294,8 @@ class VMwareVMOps(object):
 
         ddstatestring = "PENDING_CHANGE"
         ddactionstring = "POWER_OFF_SERVER"
-        self._session._wait_for_task(instance['uuid'], self.ddstatewatch(instance, ddstatestring, 1))
+        #self._session._wait_for_task(instance['uuid'], self.ddstatewatch(instance, ddstatestring, 1))
+        self._wait_for_task(instance, ddstatestring)
 
         LOG.warning('IN DEV - power_off')
         return
@@ -1258,7 +1331,7 @@ class VMwareVMOps(object):
 
         ddstatestring = "PENDING_CHANGE"
         ddactionstring = "START_SERVER"
-        self._session._wait_for_task(instance['uuid'], self.ddstatewatch(instance, ddstatestring, 1))
+        self._wait_for_task(instance, ddstatestring)
 
 
         #LOG.warning('NOT YET IMPLEMENTED - _power_on')
@@ -1290,7 +1363,7 @@ class VMwareVMOps(object):
         ddservermethodurl = ("https://%s/%s/%s/serverWithState?" % ( CONF.ddcloudapi_host_ip, CONF.ddcloudapi_apistring, CONF.ddcloudapi_orgid))
         s = requests.Session()
         response = s.get(ddservermethodurl, auth=(host_username , host_password ))
-        print response.content
+        #print response.content
 
         # Namespace stuff
         DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
@@ -1328,7 +1401,7 @@ class VMwareVMOps(object):
         #                                 api_retry_count, scheme=scheme)
         ddservermethodurl = ("https://%s/%s/%s/server/%s?start" % ( CONF.ddcloudapi_host_ip, CONF.ddcloudapi_apistring, CONF.ddcloudapi_orgidi,ccuid))
 
-        print ddservermethodurl
+        #print ddservermethodurl
 
         thisreq = requests.Session()
         response = thisreq.get(ddservermethodurl, auth=(host_username, host_password))
@@ -1350,13 +1423,10 @@ class VMwareVMOps(object):
         # the clone disk step begins to dominate the equation. A
         # better approximation would use the percentage of the VM image that
         # has been streamed to the destination host.
-        if not step:
-            step == 1
-        if not total_steps:
-            total_steps == 2
+
         progress = round(float(step) / total_steps * 100)
         instance_uuid = instance['uuid']
-        LOG.debug(_("Updating instance '%(instance_uuid)s' progress to"
+        LOG.warning(_("Updating instance '%(instance_uuid)s' progress to"
                     " %(progress)d"),
                   {'instance_uuid': instance_uuid, 'progress': progress},
                   instance=instance)
@@ -1574,16 +1644,15 @@ class VMwareVMOps(object):
         apihostname = ""
         geo = ""
 
-        LOG.warning('---------------------------------------------------------------------------------------------------------------')
         # Fetch AZ and AGG details from nova
         ctxt = context.get_admin_context()
         aggregates = self._virtapi.aggregate_get_by_host(
                         ctxt, host, key=None)
-        LOG.warning('AGGREGATES FOR THIS HOST: %s' % aggregates)
+        #LOG.warning('AGGREGATES FOR THIS HOST: %s' % aggregates)
 
         for agg in aggregates:
             meta = agg['metadetails']
-            print('%s:%s' % (agg['name'],meta['filter_tenant_id']))
+            #print('%s:%s' % (agg['name'],meta['filter_tenant_id']))
             if project_id == meta['filter_tenant_id']:
                 ddorgid = meta['ddorgid']
                 ddorgname = meta['ddorgname']
@@ -1602,12 +1671,11 @@ class VMwareVMOps(object):
                                 ' found.') % dict(host=host)
                         raise exception.NotFound(msg)
 
-        LOG.warning('---------------------------------------------------------------------------------------------------------------')
         host_url = str('https://%s/oec/%s/%s/serverWithState?' % (apihostname,apiver,ddorgid))
         s = requests.Session()
         response = s.get(host_url, auth=(ddusername , ddpassword ))
         #LOG.info("list_instances response: %s" % response.status_code)
-        print response.content
+        #print response.content
 
         # Namespace stuff
         DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
@@ -1635,10 +1703,11 @@ class VMwareVMOps(object):
         cpu_time = 0
         decoded_serverdesc = ""
         ddstate = ""
-        ddaction = ""
-        ddtotalsteps = 0
-        ddstepnumber = 0
-        ddstepname = ""
+        ddaction = "anyaction"
+        ddtotalsteps = 2
+        ddstepnumber = 1
+        ddstepname = "anystep"
+        ddhasstep = False
 
 
         #LOG.debug("INSTANCE: %s" % vars(instance))
@@ -1646,16 +1715,29 @@ class VMwareVMOps(object):
 
         for server in servers:
             hasjson = False
-            LOG.debug("INSTANCE COMPARE for %s and %s:" % (server.name, instance['display_name']))
+            #LOG.debug("INSTANCE COMPARE for %s and %s:" % (server.name, instance['display_name']))
             privateIp = str(server.privateIp)
             ip = IPAddress(privateIp)
             descriptionstr = str(server.description)
+
+            if server.find('%sstate' % NS) is not None:
+                ddstate = server.state
+
+            if server.find('%sstatus' % NS) is not None:
+                ddaction = server.status.action
+                for status in server.status:
+                    if status.find('%sstep' % NS) is not None:
+                        ddhasstep = True
+                        ddstepname = server.status.step.name
+                        ddstepnumber = server.status.step.number
+                        ddtotalsteps = server.status.numberOfSteps
+
 
             if server.description == "":
                 continue
 
             if descriptionstr[0] != "{":
-                LOG.warning("IS NOT JSON STR: %s" % descriptionstr[0])
+                #LOG.warning("IS NOT JSON STR: %s" % descriptionstr[0])
                 continue
 
 
@@ -1664,15 +1746,12 @@ class VMwareVMOps(object):
                 decoded_serverdesc = json.loads(descriptionstr)
                 decoded_serveruuid = decoded_serverdesc['stackuuid']
                 hasjson = True
-                LOG.debug("zserver.description: %s = %s" % (decoded_serverdesc,descriptionstr))
+                #LOG.debug("zserver.description: %s = %s" % (decoded_serverdesc,descriptionstr))
                 #decoded_serverdesc = json.loads(server.description)
-                LOG.warning("GOING FOR UUID: %s" % decoded_serverdesc['stackuuid'])
+                #LOG.warning("GOING FOR UUID: %s" % decoded_serverdesc['stackuuid'])
             except TypeError as excep:
-                LOG.warn("%s is not Openstack Instance - No JSON - %s" % (server.name,str(excep) ))
+                #LOG.warn("%s is not Openstack Instance - No JSON - %s" % (server.name,str(excep) ))
                 continue
-
-            if hasjson and instance['uuid'] == decoded_serveruuid:
-                LOG.debug("INSTANCE UUID MATCH")
 
 
             if instance['uuid'] == decoded_serveruuid:
@@ -1681,6 +1760,7 @@ class VMwareVMOps(object):
             if hasjson and instance['uuid'] == decoded_serveruuid and server.isDeployed == True and server.isStarted == True and server.state == "NORMAL":
                 LOG.info("Instance %s - isDeployed: %s  isStarted: %s  state:  %s" % (instance['display_name'],server.isDeployed,server.isStarted,server.state))
                 state = power_state.RUNNING
+                ddstate = server.state
                 ccexists = True
                 """
                 instance.access_ip_v4 = privateIp
@@ -1694,67 +1774,86 @@ class VMwareVMOps(object):
                 """
 
             if hasjson and instance['uuid'] == decoded_serveruuid and server.isDeployed == True and server.isStarted == False and server.state == "NORMAL":
-                LOG.info("NORMAL & RUNNING - Instance %s - isDeployed: %s  isStarted: %s  state:  %s" % (instance.display_name,server.isDeployed,server.isStarted,server.state))
+                LOG.info("NORMAL & RUNNING - Instance %s - isDeployed: %s  isStarted: %s  state:  %s" % (instance['display_name'],server.isDeployed,server.isStarted,server.state))
+                #print vars(instance)
+                state = power_state.NOSTATE
+                ddstate = server.state
+                ccexists = True
+
+            if hasjson and instance['uuid'] == decoded_serveruuid and server.isDeployed == False and server.isStarted == True and server.state != "NORMAL":
+                LOG.info("NORMAL & RUNNING - Instance %s - isDeployed: %s  isStarted: %s  state:  %s" % (instance['display_name'],server.isDeployed,server.isStarted,server.state))
+                #print vars(instance)
+                state = power_state.RUNNING
+                ddstate = server.state
+                ccexists = True
+
+            if hasjson and instance['uuid'] == decoded_serveruuid and server.isDeployed == False and server.isStarted == False and server.state != "NORMAL":
+                LOG.info("NORMAL & RUNNING - Instance %s - isDeployed: %s  isStarted: %s  state:  %s" % (instance['display_name'],server.isDeployed,server.isStarted,server.state))
+                #print vars(instance)
+                state = power_state.RUNNING
+                ddstate = server.state
+                ccexists = True
+            """
+            if hasjson and instance['uuid'] == decoded_serveruuid and server.isDeployed == True and server.isStarted == False and server.state == "NORMAL":
+                LOG.info("NORMAL & RUNNING - Instance %s - isDeployed: %s  isStarted: %s  state:  %s" % (instance['display_name'],server.isDeployed,server.isStarted,server.state))
                 #print vars(instance)
                 state = power_state.NOSTATE
                 ccexists = True
-                """
-                ctxt = nova_context.get_admin_context()
-                update_data = dict(power_state=power_state.RUNNING,
-                           _vm_state=vm_states.ACTIVE,
-                           _task_state=None)
-                           #expected_task_state=(None,task_states.SPAWNING,task_states.POWERING_OFF,task_states.STOPPING),
-                           #_launched_at=timeutils.utcnow())
-                #update_data['_access_ip_v4'] = server.privateIp
-                #instance_update(self, context, instance_uuid, updates)
-                self._virtapi.instance_update(ctxt, instance['uuid'],
-                                             **update_data)
-                """
-
-                # 3 States
-                #instance['power_state']
-                #instance['task_state']
-                #instance['vm_state']
-                LOG.warning("Existing THREE States are: %s : %s : %s" % (instance['power_state'],instance['task_state'],instance['vm_state']))
-                """
-                instance['power_state'] = power_state.SHUTDOWN
-                instance['task_state'] = None
-                instance['vm_state'] = vm_states.STOPPED
-                instance.save(expected_task_state=(None,task_states.SPAWNING,task_states.POWERING_OFF,
-                                                   task_states.STOPPING))
-                """
-                #state = power_state.NOSTATE
-                #instance['access_ip_v4'] = privateIp
-                #instance.save()
-                """
-                instance.power_state = power_state.NOSTATE
-                instance.save
-                instance.task_state = None
-                instance.save()
-                instance.vm_state = vm_states.STOPPED
-                #m_states.SUSPENDED
-                instance.save()
-                """
+            """
+            LOG.warning("Existing THREE States are: %s : %s : %s" % (instance['power_state'],instance['task_state'],instance['vm_state']))
 
 
             if hasjson and server.name == instance['display_name'] and server.state == "PENDING_ADD":
-                LOG.warning("PENDING_ADD - INSTANCE MATCH for PENDING_ADD: %s and %s" % (server['name'], instance['display_name']))
-                state = power_state.RUNNING
+                LOG.warning("PENDING_ADD - INSTANCE MATCH for: %s and %s" % (server['name'], instance['display_name']))
+                #state = power_state.RUNNING
                 ccexists = True
                 ddstate = server.state
-                ddaction = server.status.action
-                ddtotalsteps = server.status.numberOfSteps
-                ddstepnumber = server.status.step.number
+                ddhasstep = True
                 ddstepname = server.status.step.name
-                """
-                instance['vm_state'] = vm_states.ACTIVE
-                instance.save()
-                instance['task_state'] = task_states.SPAWNING
-                instance.save()
-                """
+                ddstepnumber = server.status.step.number
+                ddtotalsteps = server.status.numberOfSteps
+                #if server.status.find('step') is not None:
+                #ddstepname = server.status.step.name
+                #ddstepnumber = server.status.step.number
+                #ddtotalsteps = server.status.numberOfSteps
+                #ddstate = server.state
+                #ddaction = server.status.action
+                #ddtotalsteps = server.status.numberOfSteps
+                #ddstepnumber = server.status.step.number
+                #ddstepname = server.status.step.name
+
+            if hasjson and server.name == instance['display_name'] and server.state == "PENDING_CHANGE":
+                LOG.warning("PENDING_CHANGE - INSTANCE MATCH for: %s and %s" % (server['name'], instance['display_name']))
+                #state = power_state.RUNNING
+                ccexists = True
+                #ddstate = server.state
+                #ddaction = server.status.action
+                #ddtotalsteps = 2
+                #ddstepnumber = 1
+                #ddstepname = "Change Server"
+
+            if hasjson and server.name == instance['display_name'] and server.state == "PENDING_DELETE":
+                LOG.warning("PENDING_DELETE - INSTANCE MATCH: %s and %s" % (server['name'], instance['display_name']))
+                #state = power_state.RUNNING
+                ccexists = True
+                #ddstate = server.state
+                #ddaction = server.status.action
+                #ddtotalsteps = 2
+                #ddstepnumber = 1
+                #ddstepname = "Delete Server"
+
+            if hasjson and server.name == instance['display_name'] and server.state == "PENDING_CLEAN":
+                LOG.warning("PENDING_CLEAN - INSTANCE MATCH: %s and %s" % (server['name'], instance['display_name']))
+                #state = power_state.RUNNING
+                ccexists = True
+                #ddstate = server.state
+                #ddaction = server.status.action
+                #ddtotalsteps = 2
+                #ddstepnumber = 1
+                #ddstepname = server.status.step.name
 
             if hasjson and server.name == instance['display_name'] and server.state == "FAILED_ADD":
-                LOG.warning("FAILED_ADD - INSTANCE MATCH for PENDING_ADD: %s and %s" % (server['name'], instance['display_name']))
+                LOG.warning("FAILED_ADD - INSTANCE MATCH for: %s and %s" % (server['name'], instance['display_name']))
                 state = power_state.RUNNING
                 ccexists = True
                 """
@@ -1781,7 +1880,9 @@ class VMwareVMOps(object):
                 'ddaction': ddaction,
                 'ddtotalsteps': ddtotalsteps,
                 'ddstepnumber': ddstepnumber,
-                'ddstepname': ddstepname}
+                'ddstepname': ddstepname,
+                'ddhasstep':ddhasstep,
+                'ccexists': ccexists}
 
 
     def get_diagnostics(self, instance):
@@ -2070,3 +2171,27 @@ class VMwareVMOps(object):
     def unplug_vifs(self, instance, network_info):
         """Unplug VIFs from networks."""
         pass
+
+    def _wait_for_task(self, instance_uuid, task_ref):
+        """
+        Return a Deferred that will give the result of the given task.
+        The task is polled until it completes.
+        """
+        done = event.Event()
+        loop = loopingcall.FixedIntervalLoopingCall(self._poll_task,
+                                                    instance_uuid,
+                                                    task_ref, done)
+        loop.start(CONF.ddcloudapi_task_poll_interval)
+        ret_val = done.wait()
+        loop.stop()
+        return ret_val
+
+    def _poll_task(self, instance_uuid, task_ref, done):
+        """
+        Poll the given task, and fires the given Deferred if we
+        get a result.
+        """
+        self.ddstatewatch(instance_uuid, task_ref, 5)
+
+        done.send("success")
+        return
