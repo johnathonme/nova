@@ -990,18 +990,22 @@ class ComputeManager(manager.SchedulerDependentManager):
             with rt.instance_claim(context, instance, limits):
                 macs = self.driver.macs_for_instance(instance)
 
-                network_info = []
+                network_info = requested_networks
 
                 instance = self._spawn(context, instance, image_meta,
                                        network_info, block_device_info,
                                        injected_files, admin_password,
                                        set_access_ip=set_access_ip)
 
-                dd_ip_address = instance['access_ip_v4']
-                LOG.warning('COMPUTE/MANAGER.PY HAS PRIVATEIP: %s' % dd_ip_address)
+		network_info = None
 
-                network_info = self._allocate_network_with_ip(context, instance,
-                        requested_networks, macs, security_groups, dd_ip_address)
+                dd_ip_address = instance['access_ip_v4']
+                #LOG.warning('COMPUTE/MANAGER.PY HAS PRIVATEIP: %s' % dd_ip_address)
+
+		network_info = self._allocate_network(context, instance, requested_networks, macs, security_groups)
+
+                #network_info = self._allocate_network_with_ip(context, instance,
+                #        requested_networks, macs, security_groups, dd_ip_address)
 
                 self._instance_update(
                         context, instance['uuid'],
