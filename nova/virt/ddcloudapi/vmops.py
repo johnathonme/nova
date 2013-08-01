@@ -801,15 +801,18 @@ class VMwareVMOps(object):
         for agg in aggregates:
             meta = agg['metadetails']
             #print('%s:%s' % (agg['name'],meta['filter_tenant_id']))
-            if project_id == meta['filter_tenant_id']:
-                ddorgid = meta['ddorgid']
-                ddorgname = meta['ddorgname']
-                ddusername = meta['ddusername']
-                ddpassword = meta['ddpassword']
-                apiver = meta['apiver']
-                location = meta['location']
-                apihostname = meta['apihostname']
-                geo = meta['geo']
+            try:
+                if project_id == meta['filter_tenant_id']:
+                    ddorgid = meta['ddorgid']
+                    ddorgname = meta['ddorgname']
+                    ddusername = meta['ddusername']
+                    ddpassword = meta['ddpassword']
+                    apiver = meta['apiver']
+                    location = meta['location']
+                    apihostname = meta['apihostname']
+                    geo = meta['geo']
+            except:
+                 contiue
 
 
         # Exception if we got nothing
@@ -1496,20 +1499,23 @@ class VMwareVMOps(object):
         ctxt = context.get_admin_context()
         aggregates = self._virtapi.aggregate_get_by_host(
                         ctxt, host, key=None)
-        #LOG.warning('AGGREGATES FOR THIS HOST: %s' % aggregates)
+        LOG.warning('AGGREGATES FOR THIS HOST: %s' % aggregates)
 
         for agg in aggregates:
             meta = agg['metadetails']
             #print('%s:%s' % (agg['name'],meta['filter_tenant_id']))
-            if project_id == meta['filter_tenant_id']:
-                ddorgid = meta['ddorgid']
-                ddorgname = meta['ddorgname']
-                ddusername = meta['ddusername']
-                ddpassword = meta['ddpassword']
-                apiver = meta['apiver']
-                location = meta['location']
-                apihostname = meta['apihostname']
-                geo = meta['geo']
+            try:
+                if project_id == meta['filter_tenant_id']:
+                    ddorgid = meta['ddorgid']
+                    ddorgname = meta['ddorgname']
+                    ddusername = meta['ddusername']
+                    ddpassword = meta['ddpassword']
+                    apiver = meta['apiver']
+                    location = meta['location']
+                    apihostname = meta['apihostname']
+                    geo = meta['geo']
+            except:
+                continue
 
 
 
