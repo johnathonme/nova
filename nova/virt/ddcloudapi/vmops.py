@@ -287,7 +287,7 @@ class VMwareVMOps(object):
         LOG.debug('SPAWNING NETWORK_INFO:  %s' % vars(network_info))
         LOG.warning('SPAWNING Network Label:  %s'  % network_info[0]["network"]["label"])
         LOG.warning('SPAWNING IMAGE_REF: %s' % instance['image_ref'])
-        LOG.warning('SPAWNING image_meta: %s' % vars(image_meta))
+        LOG.warning('SPAWNING image_meta: %s' % image_meta)
 
 
         ccnetworkid = self.fetchNetworkid(network_info[0]["network"]["label"])
@@ -812,7 +812,7 @@ class VMwareVMOps(object):
                     apihostname = meta['apihostname']
                     geo = meta['geo']
             except:
-                 contiue
+                 continue
 
 
         # Exception if we got nothing
@@ -1177,7 +1177,7 @@ class VMwareVMOps(object):
 
     def fetchPrivateIpForInstance(self, dd_uuid):
 
-        LOG.info("Fetching stackdisplay_name: %s with stackuuid: %s" % (stackdisplay_name, stackuuid))
+        #LOG.info("Fetching stackdisplay_name: %s with stackuuid: %s" % (stackdisplay_name, stackuuid))
         self._host_ip = CONF.ddcloudapi_host_ip
         host_username = CONF.ddcloudapi_host_username
         host_password = CONF.ddcloudapi_host_password
@@ -1205,7 +1205,7 @@ class VMwareVMOps(object):
         return None
 
 
-    def fetchCcUuid(self, stackdisplay_name,stackuuid):
+    def fetchCcUuid(self, stackdisplay_name, stackuuid):
         LOG.info("Fetching stackdisplay_name: %s with stackuuid: %s" % (stackdisplay_name, stackuuid))
         self._host_ip = CONF.ddcloudapi_host_ip
         host_username = CONF.ddcloudapi_host_username

@@ -1000,10 +1000,8 @@ class ComputeManager(manager.SchedulerDependentManager):
 
                 network_info = self._allocate_network(context, instance, requested_networks, macs, security_groups)
 
-                instance = self._spawn(context, instance, image_meta,
-                                       network_info, block_device_info,
-                                       injected_files, admin_password,
-                                       set_access_ip=set_access_ip)
+                block_device_info = self._prep_block_device(context, instance, bdms)
+
 
                 #network_info = self._allocate_network_with_ip(context, instance,
                 #        requested_networks, macs, security_groups, dd_ip_address)
@@ -1013,13 +1011,15 @@ class ComputeManager(manager.SchedulerDependentManager):
                         vm_state=vm_states.BUILDING,
                         task_state=task_states.BLOCK_DEVICE_MAPPING)
 
-                block_device_info = self._prep_block_device(
-                        context, instance, bdms)
 
                 set_access_ip = (is_first_time and
                                  not instance['access_ip_v4'] and
                                  not instance['access_ip_v6'])
 
+                instance = self._spawn(context, instance, image_meta,
+                                       network_info, block_device_info,
+                                       injected_files, admin_password,
+                                       set_access_ip=set_access_ip)
 
         except exception.InstanceNotFound:
             # the instance got deleted during the spawn
