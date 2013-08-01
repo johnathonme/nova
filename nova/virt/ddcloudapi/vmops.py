@@ -281,12 +281,11 @@ class VMwareVMOps(object):
         return '65d2a7c4-dfe2-11e2-a7c0-000af700e018'
 
 
-    def spawn(self, context, instance, image_meta, network_info,
-              block_device_info=None, admin_password):
+    def spawn(self, context, instance, image_meta, network_info, admin_password, block_device_info=None):
 
         LOG.debug('SPAWNING: %s %s %s %s %s' % (context, instance, image_meta, network_info, block_device_info))
         LOG.debug('SPAWNING NETWORK_INFO:  %s' % vars(network_info))
-        LOG.warning('SPAWNING Network Label:  %s'  % network_info[0]["network"]["label"])a
+        LOG.warning('SPAWNING Network Label:  %s'  % network_info[0]["network"]["label"])
         LOG.warning('SPAWNING IMAGE_REF: %s' % instance['image_ref'])
         LOG.warning('SPAWNING image_meta: %s' % vars(image_meta))
 
