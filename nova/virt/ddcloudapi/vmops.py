@@ -249,14 +249,14 @@ class VMwareVMOps(object):
         fetchurl = ("https://api-ap.dimensiondata.com/oec/0.9/base/image/deployedWithSoftwareLabels/%s" % cclocation)
         s = requests.Session()
         response = s.get(fetchurl, auth=(host_username , host_password ))
-        #LOG.info("list_instances response: %s" % response.status_code)
+        LOG.info("fetchImageid response: %s" % response.status_code)
 
-        #print response.content
+        print response.content
 
         # Namespace stuff
         DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
-        DD_NAMESPACE = "http://oec.api.opsource.net/schemas/network"
-        DD_NAMESPACE = ""
+        #DD_NAMESPACE = "http://oec.api.opsource.net/schemas/network"
+        #DD_NAMESPACE = ""
         NS = "{%s}" % DD_NAMESPACE
 
 
@@ -271,7 +271,8 @@ class VMwareVMOps(object):
         #for e in root.serverWithState.iterchildren():
         #    print "%s => %s" % (e.tag, e.text)
 
-        images  = root.findall("//DeployedImageWithSoftwareLabels" ) # find all the groups
+        images  = root.findall("//%sDeployedImageWithSoftwareLabels" % NS) # find all the groups
+        print images
 
         for image in images:
             if image.name == imagelabel and image.location == cclocation:
