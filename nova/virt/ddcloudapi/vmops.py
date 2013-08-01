@@ -285,16 +285,24 @@ class VMwareVMOps(object):
 
         LOG.debug('SPAWNING: %s %s %s %s %s' % (context, instance, image_meta, network_info, block_device_info))
         LOG.debug('SPAWNING NETWORK_INFO:  %s' % vars(network_info))
+        #LOG.warning('SPAWNING NETWORK_INFO fixed_ips: %s' % network_info[0]['info']['ips'])
         LOG.warning('SPAWNING Network Label:  %s'  % network_info[0]["network"]["label"])
         LOG.warning('SPAWNING IMAGE_REF: %s' % instance['image_ref'])
         LOG.warning('SPAWNING image_meta: %s' % image_meta)
 
+        # Get what we need
+        apihostname, apiver, ddorgid, targetid, ddusername, ddpassword, location = self.ddpreconnect_withinstance(instance)
 
+        # Preping needed variables
         ccnetworkid = self.fetchNetworkid(network_info[0]["network"]["label"])
         cctenantid = "e2c43389-90de-4498-b7d0-056e8db0b381"
-        ccimageid = self.fetchImageid('Ubuntu 12.04 2 CPU','AP1')
+        #ccimageid = self.fetchImageid('Ubuntu 12.04 2 CPU','AP1')
         #ccimageid = "65cf01aa-dfe2-11e2-a7c0-000af700e018"
+        ccimagename = image_meta['name']
+        ccimageid = self.fetchImageid(ccimagename, location)
         ccinstanceadminpwd = admin_password or "cloudcloudcloud"
+        cclocation = location
+        LOG.warning('SPAWN PARAMS FOR SPAWN: ccnetworkid: %s, cctenantid: %s, ccimagename: %s, ccimageid: %s, ccinstanceadminpwd: %s, cclocation: %s' % (ccnetworkid, cctenantid, ccimagename, ccimageid, ccinstanceadminpwd, cclocation))
 
 
         ddstate = ""
@@ -439,7 +447,7 @@ class VMwareVMOps(object):
 
 
             # NEW Method here:
-            apihostname, apiver, ddorgid, targetid, ddusername, ddpassword, location = self.ddpreconnect_withinstance(instance)
+            #apihostname, apiver, ddorgid, targetid, ddusername, ddpassword, location = self.ddpreconnect_withinstance(instance)
             host_url = str('https://%s/oec/%s/%s/server' % (apihostname,apiver,ddorgid))
             s = requests.Session()
             headers = {'content-type': 'application/xml'}
@@ -802,7 +810,7 @@ class VMwareVMOps(object):
             meta = agg['metadetails']
             #print('%s:%s' % (agg['name'],meta['filter_tenant_id']))
             try:
-                if project_id == meta['filter_tenant_id']:
+                if (project_id == meta['filter_tenant_id'] and instance['availability_zone'] == meta['availability_zone']):
                     ddorgid = meta['ddorgid']
                     ddorgname = meta['ddorgname']
                     ddusername = meta['ddusername']
@@ -824,22 +832,22 @@ class VMwareVMOps(object):
 
 
     def _delete(self, instance, network_info):
-        LOG.warning('NOT YET IMPLEMENTED - _delete')
-        return
+        #LOG.warning('NOT YET IMPLEMENTED - _delete')
+        #return
         """
         Destroy a VM instance. Steps followed are:
         1. Power off the VM, if it is in poweredOn state.
         2. Destroy the VM.
         """
         try:
-            vm_ref = vm_util.get_vm_ref(self._session, instance)
+            #vm_ref = vm_util.get_vm_ref(self._session, instance)
             self.power_off(instance)
             try:
-                LOG.debug(_("Destroying the VM"), instance=instance)
-                destroy_task = self._session._call_method(
-                    self._session._get_vim(),
-                    "Destroy_Task", vm_ref)
-                self._session._wait_for_task(instance['uuid'], destroy_task)
+                #LOG.debug(_("Destroying the VM"), instance=instance)
+                #destroy_task = self._session._call_method(
+                #    self._session._get_vim(),
+                #    "Destroy_Task", vm_ref)
+                #self._session._wait_for_task(instance['uuid'], destroy_task)
                 LOG.debug(_("Destroyed the VM"), instance=instance)
             except Exception as excep:
                 LOG.warn(_("In ddcloudapi:vmops:delete, got this exception"
@@ -892,6 +900,11 @@ class VMwareVMOps(object):
                                 ' found.') % dict(host=host)
                         raise exception.NotFound(msg)
         """
+	# Shutdown if needed
+	ddstates = self.get_info(instance)
+	if (ddstates['state'] != power_state.NOSTATE and ddstates['ccexists']):
+                LOG.warning('DESTROY - Not at NOSTATE - Powering Off')
+        	self.power_off(instance)	
 
         # Emergency Terminate
         ddstates = self.get_info(instance)
