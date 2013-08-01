@@ -432,7 +432,7 @@ class VMwareVMOps(object):
             itemadministratorPassword = etree.SubElement(root, "administratorPassword")
             itemadministratorPassword.text = ccinstanceadminpwd
             itemisStarted = etree.SubElement(root, "isStarted")
-            itemisStarted.text = "false"
+            itemisStarted.text = "true"
             newserverstring = etree.tostring(root, method='xml', encoding="UTF-8", xml_declaration=True)
 
             LOG.debug('ABOUT TO POST:  %s'  % newserverstring)
@@ -506,7 +506,7 @@ class VMwareVMOps(object):
         ddstatestring = "NORMAL"
         self._wait_for_task(instance, ddstatestring)
 
-        self._power_on(instance)
+        #self._power_on(instance)
 
 
         #self._session._wait_for_task(instance['uuid'], _spawnwatch())
