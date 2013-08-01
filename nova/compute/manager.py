@@ -990,8 +990,18 @@ class ComputeManager(manager.SchedulerDependentManager):
             with rt.instance_claim(context, instance, limits):
                 macs = self.driver.macs_for_instance(instance)
 
-                network_info = self._allocate_network(context, instance,
-                        requested_networks, macs, security_groups)
+                network_info = []
+
+                instance = self._spawn(context, instance, image_meta,
+                                       network_info, block_device_info,
+                                       injected_files, admin_password,
+                                       set_access_ip=set_access_ip)
+
+                dd_ip_address = instance['access_ip_v4']
+                LOG.warning('COMPUTE/MANAGER.PY HAS PRIVATEIP: %s' % dd_ip_address)
+
+                network_info = self._allocate_network_with_ip(context, instance,
+                        requested_networks, macs, security_groups, dd_ip_address)
 
                 self._instance_update(
                         context, instance['uuid'],
@@ -1005,10 +1015,7 @@ class ComputeManager(manager.SchedulerDependentManager):
                                  not instance['access_ip_v4'] and
                                  not instance['access_ip_v6'])
 
-                instance = self._spawn(context, instance, image_meta,
-                                       network_info, block_device_info,
-                                       injected_files, admin_password,
-                                       set_access_ip=set_access_ip)
+
         except exception.InstanceNotFound:
             # the instance got deleted during the spawn
             # Make sure the async call finishes
@@ -1218,6 +1225,69 @@ class ComputeManager(manager.SchedulerDependentManager):
                 if retry_time > 30:
                     retry_time = 30
         # Not reached.
+
+    def _allocate_network_with_ip(self, context, instance, requested_networks, macs,
+                          security_groups, dd_ip_address):
+        """Start network allocation asynchronously.  Return an instance
+        of NetworkInfoAsyncWrapper that can be used to retrieve the
+        allocated networks when the operation has finished.
+        """
+        # NOTE(comstud): Since we're allocating networks asynchronously,
+        # this task state has little meaning, as we won't be in this
+        # state for very long.
+        instance = self._instance_update(context, instance['uuid'],
+                                         vm_state=vm_states.BUILDING,
+                                         task_state=task_states.NETWORKING,
+                                         expected_task_state=None)
+        is_vpn = pipelib.is_vpn_image(instance['image_ref'])
+
+        LOG.debug(_("Allocating IP information in the background."),
+                  instance=instance)
+        retries = CONF.network_allocate_retries
+        if retries < 0:
+            LOG.warn(_("Treating negative config value (%(retries)s) for "
+                       "'network_allocate_retries' as 0."),
+                     {'retries': retries})
+        attempts = retries > 1 and retries + 1 or 1
+        retry_time = 1
+        for attempt in range(1, attempts + 1):
+            try:
+                nwinfo = self.network_api.allocate_for_instance(
+                        context, instance, vpn=is_vpn,
+                        requested_networks=requested_networks,
+                        macs=macs,
+                        conductor_api=self.conductor_api,
+                        security_groups=security_groups)
+                LOG.debug(_('Instance network_info: |%s|'), nwinfo,
+                          instance=instance)
+                return nwinfo
+            except Exception:
+                exc_info = sys.exc_info()
+                log_info = {'attempt': attempt,
+                            'attempts': attempts}
+                if attempt == attempts:
+                    LOG.exception(_('Instance failed network setup '
+                                    'after %(attempts)d attempt(s)'),
+                                  log_info)
+                    raise exc_info[0], exc_info[1], exc_info[2]
+                LOG.warn(_('Instance failed network setup '
+                           '(attempt %(attempt)d of %(attempts)d)'),
+                         log_info, instance=instance)
+                time.sleep(retry_time)
+                retry_time *= 2
+                if retry_time > 30:
+                    retry_time = 30
+        # Not reached.
+
+        """
+
+        return self._allocate_network_async(context, instance,
+                requested_networks, macs, security_groups, is_vpn)
+
+        return network_model.NetworkInfoAsyncWrapper(
+                self._allocate_network_async, context, instance,
+                requested_networks, macs, security_groups, is_vpn)
+        """
 
     def _allocate_network(self, context, instance, requested_networks, macs,
                           security_groups):

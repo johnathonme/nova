@@ -537,7 +537,7 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
               admin_password, network_info=None, block_device_info=None):
         """Create VM instance."""
         self._vmops.spawn(context, instance, image_meta, network_info,
-                          block_device_info)
+                          block_device_info, admin_password)
 
     def snapshot(self, context, instance, name, update_task_state):
         """Create snapshot from a running VM instance."""

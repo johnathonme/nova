@@ -282,17 +282,20 @@ class VMwareVMOps(object):
 
 
     def spawn(self, context, instance, image_meta, network_info,
-              block_device_info=None):
+              block_device_info=None, admin_password):
 
         LOG.debug('SPAWNING: %s %s %s %s %s' % (context, instance, image_meta, network_info, block_device_info))
         LOG.debug('SPAWNING NETWORK_INFO:  %s' % vars(network_info))
-        LOG.debug('SPAWNING Network Label:  %s'  % network_info[0]["network"]["label"])
+        LOG.warning('SPAWNING Network Label:  %s'  % network_info[0]["network"]["label"])a
+        LOG.warning('SPAWNING IMAGE_REF: %s' % instance['image_ref'])
+        LOG.warning('SPAWNING image_meta: %s' % vars(image_meta))
+
 
         ccnetworkid = self.fetchNetworkid(network_info[0]["network"]["label"])
         cctenantid = "e2c43389-90de-4498-b7d0-056e8db0b381"
         ccimageid = self.fetchImageid('Ubuntu 12.04 2 CPU','AP1')
         #ccimageid = "65cf01aa-dfe2-11e2-a7c0-000af700e018"
-        ccinstanceadminpwd = "cloudcloudcloud"
+        ccinstanceadminpwd = admin_password or "cloudcloudcloud"
 
 
         ddstate = ""
@@ -300,6 +303,11 @@ class VMwareVMOps(object):
         ddtotalsteps = 0
         ddstepnumber = 0
         ddstepname = ""
+
+
+
+
+
 
         #self._update_instance_progress(context, instance,
         #                               step=1,
@@ -403,6 +411,8 @@ class VMwareVMOps(object):
             """Create VM on ESX host."""
             LOG.debug(_("Creating VM on the ESX host"), instance=instance)
 
+
+
             #Prepare DescriptionJson
             instancedesc = { 'stackname': instance['hostname'], 'stackuuid':instance['uuid'], 'stackproject':instance['project_id'],'stackimage':instance['image_ref']}
             instancedescjson = json.dumps(instancedesc)
@@ -423,38 +433,46 @@ class VMwareVMOps(object):
             itemadministratorPassword = etree.SubElement(root, "administratorPassword")
             itemadministratorPassword.text = ccinstanceadminpwd
             itemisStarted = etree.SubElement(root, "isStarted")
-            itemisStarted.text = "true"
+            itemisStarted.text = "false"
             newserverstring = etree.tostring(root, method='xml', encoding="UTF-8", xml_declaration=True)
 
             LOG.debug('ABOUT TO POST:  %s'  % newserverstring)
 
 
-            import requests
+            # NEW Method here:
+            apihostname, apiver, ddorgid, targetid, ddusername, ddpassword, location = self.ddpreconnect_withinstance(instance)
+            host_url = str('https://%s/oec/%s/%s/server' % (apihostname,apiver,ddorgid))
+            s = requests.Session()
+            headers = {'content-type': 'application/xml'}
+            response = s.post(host_url, data=newserverstring, headers=headers, auth=('dev1-apiuser', 'cloudcloudcloud'))
+            LOG.debug('Action Response: %s - %s' % (response.status_code,response.content))
+
+            if response.status_code == 200:
+                LOG.info('Request to DD Cloudocontol a SUCCESS - fetching privateIp')
+                cc_uuid = self.fetchCcUuid(instance['display_name'],instance['uuid'])
+                privateip = self.fetchPrivateIpForInstance(cc_uuid)
+                LOG.info('Request to DD Cloudocontol a SUCCESS - privateIp: %s' % privateip)
+
+
+            """
             s = requests.Session()
             url = 'https://api-ap.dimensiondata.com/oec/0.9/e2c43389-90de-4498-b7d0-056e8db0b381/server'
-            headers = {'content-type': 'application/xml'}
-            response = s.post(url, data=newserverstring, headers=headers, auth=('dev1-apiuser', 'cloudcloudcloud'))
+
             #print s.post(url, data=newserverstring, headers=headers, auth=('dev1-apiuser', 'cloudcloudcloud')).text
             LOG.debug('POSTING:  %s'  % response.text)
 
             LOG.debug('POST RESPONSE: %s and explain: %s' % (response, response.text))
+            """
 
-            LOG.debug(_("Created VM on CloudControl "), instance=instance)
+            LOG.debug(("Created VM on CloudControl "), instance=instance)
 
             #instance.task_state = task_states.SPAWNING
             #instance.save()
             #instance.vm_state = vm_states.BUILDING
             #instance.save()
 
-            """
-            # Create the VM on the ESX host
-            vm_create_task = self._session._call_method(
-                                    self._session._get_vim(),
-                                    "CreateVM_Task", vm_folder_ref,
-                                    config=config_spec, pool=res_pool_ref)
-            """
 
-            LOG.debug(_("Created VM on the ESX host"), instance=instance)
+
 
         _execute_create_vm()
         vm_ref = vm_util.get_vm_ref(self._session, instance)
@@ -465,205 +483,9 @@ class VMwareVMOps(object):
             #self._set_machine_id(client_factory, instance, network_info)
             pass
 
-        """
-        # Set the vnc configuration of the instance, vnc port starts from 5900
-        if CONF.vnc_enabled:
-            vnc_port = self._get_vnc_port(vm_ref)
-            vnc_pass = CONF.vnc_password or ''
-            self._set_vnc_config(client_factory, instance, vnc_port, vnc_pass)
 
-        def _create_virtual_disk():
-            #Create a virtual disk of the size of flat vmdk file.
-            # Create a Virtual Disk of the size of the flat vmdk file. This is
-            # done just to generate the meta-data file whose specifics
-            # depend on the size of the disk, thin/thick provisioning and the
-            # storage adapter type.
-            # Here we assume thick provisioning and lsiLogic for the adapter
-            # type
-            LOG.debug(_("Creating Virtual Disk of size  "
-                      "%(vmdk_file_size_in_kb)s KB and adapter type "
-                      "%(adapter_type)s on the ESX host local store "
-                      "%(data_store_name)s") %
-                       {"vmdk_file_size_in_kb": vmdk_file_size_in_kb,
-                        "adapter_type": adapter_type,
-                        "data_store_name": data_store_name},
-                      instance=instance)
-            vmdk_create_spec = vm_util.get_vmdk_create_spec(client_factory,
-                                    vmdk_file_size_in_kb, adapter_type,
-                                    disk_type)
-            vmdk_create_task = self._session._call_method(
-                self._session._get_vim(),
-                "CreateVirtualDisk_Task",
-                service_content.virtualDiskManager,
-                name=uploaded_vmdk_path,
-                datacenter=dc_ref,
-                spec=vmdk_create_spec)
-            self._session._wait_for_task(instance['uuid'], vmdk_create_task)
-            LOG.debug(_("Created Virtual Disk of size %(vmdk_file_size_in_kb)s"
-                        " KB and type %(disk_type)s on "
-                        "the ESX host local store %(data_store_name)s") %
-                        {"vmdk_file_size_in_kb": vmdk_file_size_in_kb,
-                         "disk_type": disk_type,
-                         "data_store_name": data_store_name},
-                      instance=instance)
 
-        def _delete_disk_file(vmdk_path):
-            LOG.debug(_("Deleting the file %(vmdk_path)s "
-                        "on the ESX host local"
-                        "store %(data_store_name)s") %
-                        {"vmdk_path": vmdk_path,
-                         "data_store_name": data_store_name},
-                      instance=instance)
-            # Delete the vmdk file.
-            vmdk_delete_task = self._session._call_method(
-                        self._session._get_vim(),
-                        "DeleteDatastoreFile_Task",
-                        service_content.fileManager,
-                        name=vmdk_path,
-                        datacenter=dc_ref)
-            self._session._wait_for_task(instance['uuid'], vmdk_delete_task)
-            LOG.debug(_("Deleted the file %(vmdk_path)s on the "
-                        "ESX host local store %(data_store_name)s") %
-                        {"vmdk_path": vmdk_path,
-                         "data_store_name": data_store_name},
-                      instance=instance)
 
-        def _fetch_image_on_esx_datastore():
-            #Fetch image from Glance to ESX datastore.
-            LOG.debug(_("Downloading image file data %(image_ref)s to the ESX "
-                        "data store %(data_store_name)s") %
-                        {'image_ref': instance['image_ref'],
-                         'data_store_name': data_store_name},
-                      instance=instance)
-            # For flat disk, upload the -flat.vmdk file whose meta-data file
-            # we just created above
-            # For sparse disk, upload the -sparse.vmdk file to be copied into
-            # a flat vmdk
-            upload_vmdk_name = sparse_uploaded_vmdk_name \
-                if disk_type == "sparse" else flat_uploaded_vmdk_name
-            vmware_images.fetch_image(
-                context,
-                instance['image_ref'],
-                instance,
-                host=self._session._host_ip,
-                data_center_name=self._get_datacenter_ref_and_name()[1],
-                datastore_name=data_store_name,
-                cookies=cookies,
-                file_path=upload_vmdk_name)
-            LOG.debug(_("Downloaded image file data %(image_ref)s to "
-                        "%(upload_vmdk_name)s on the ESX data store "
-                        "%(data_store_name)s") %
-                        {'image_ref': instance['image_ref'],
-                         'upload_vmdk_name': upload_vmdk_name,
-                         'data_store_name': data_store_name},
-                      instance=instance)
-
-        def _copy_virtual_disk():
-            #Copy a sparse virtual disk to a thin virtual disk.
-            # Copy a sparse virtual disk to a thin virtual disk. This is also
-            # done to generate the meta-data file whose specifics
-            # depend on the size of the disk, thin/thick provisioning and the
-            # storage adapter type.
-            LOG.debug(_("Copying Virtual Disk of size "
-                      "%(vmdk_file_size_in_kb)s KB and adapter type "
-                      "%(adapter_type)s on the ESX host local store "
-                      "%(data_store_name)s to disk type %(disk_type)s") %
-                       {"vmdk_file_size_in_kb": vmdk_file_size_in_kb,
-                        "adapter_type": adapter_type,
-                        "data_store_name": data_store_name,
-                        "disk_type": disk_type},
-                      instance=instance)
-            vmdk_copy_spec = vm_util.get_vmdk_create_spec(client_factory,
-                                    vmdk_file_size_in_kb, adapter_type,
-                                    disk_type)
-            vmdk_copy_task = self._session._call_method(
-                self._session._get_vim(),
-                "CopyVirtualDisk_Task",
-                service_content.virtualDiskManager,
-                sourceName=sparse_uploaded_vmdk_path,
-                sourceDatacenter=self._get_datacenter_ref_and_name()[0],
-                destName=uploaded_vmdk_path,
-                destSpec=vmdk_copy_spec)
-            self._session._wait_for_task(instance['uuid'], vmdk_copy_task)
-            LOG.debug(_("Copied Virtual Disk of size %(vmdk_file_size_in_kb)s"
-                        " KB and type %(disk_type)s on "
-                        "the ESX host local store %(data_store_name)s") %
-                        {"vmdk_file_size_in_kb": vmdk_file_size_in_kb,
-                         "disk_type": disk_type,
-                         "data_store_name": data_store_name},
-                        instance=instance)
-        """
-
-        """
-        ebs_root = block_device.volume_in_mapping(
-                self._default_root_device, block_device_info)
-
-        if not ebs_root:
-            linked_clone = CONF.use_linked_clone
-            if linked_clone:
-                upload_folder = self._instance_path_base
-                upload_name = instance['image_ref']
-            else:
-                upload_folder = instance['uuid']
-                upload_name = instance['name']
-
-            # The vmdk meta-data file
-            uploaded_vmdk_name = "%s/%s.vmdk" % (upload_folder, upload_name)
-            uploaded_vmdk_path = vm_util.build_datastore_path(data_store_name,
-                                                uploaded_vmdk_name)
-
-            if not (linked_clone and self._check_if_folder_file_exists(
-                                        data_store_ref, data_store_name,
-                                        upload_folder, upload_name + ".vmdk")):
-
-                # Naming the VM files in correspondence with the VM instance
-                # The flat vmdk file name
-                flat_uploaded_vmdk_name = "%s/%s-flat.vmdk" % (
-                                            upload_folder, upload_name)
-                # The sparse vmdk file name for sparse disk image
-                sparse_uploaded_vmdk_name = "%s/%s-sparse.vmdk" % (
-                                            upload_folder, upload_name)
-
-                flat_uploaded_vmdk_path = vm_util.build_datastore_path(
-                                                    data_store_name,
-                                                    flat_uploaded_vmdk_name)
-                sparse_uploaded_vmdk_path = vm_util.build_datastore_path(
-                                                    data_store_name,
-                                                    sparse_uploaded_vmdk_name)
-                dc_ref = self._get_datacenter_ref_and_name()[0]
-
-                if disk_type != "sparse":
-                   # Create a flat virtual disk and retain the metadata file.
-                    _create_virtual_disk()
-                    _delete_disk_file(flat_uploaded_vmdk_path)
-
-                cookies = \
-                    self._session._get_vim().client.options.transport.cookiejar
-                _fetch_image_on_esx_datastore()
-
-                if disk_type == "sparse":
-                    # Copy the sparse virtual disk to a thin virtual disk.
-                    disk_type = "thin"
-                    _copy_virtual_disk()
-                    _delete_disk_file(sparse_uploaded_vmdk_path)
-            else:
-                # linked clone base disk exists
-                if disk_type == "sparse":
-                    disk_type = "thin"
-
-            # Attach the vmdk uploaded to the VM.
-            self._volumeops.attach_disk_to_vm(
-                                vm_ref, instance,
-                                adapter_type, disk_type, uploaded_vmdk_path,
-                                vmdk_file_size_in_kb, linked_clone)
-        else:
-            # Attach the root disk to the VM.
-            root_disk = driver.block_device_info_get_mapping(
-                           block_device_info)[0]
-            connection_info = root_disk['connection_info']
-            self._volumeops.attach_volume(connection_info, instance['uuid'],
-                                          self._default_root_device)
-        """
         def _power_on_vm():
             """Power on the VM."""
             LOG.debug(_("Powering on the VM instance"), instance=instance)
@@ -675,11 +497,8 @@ class VMwareVMOps(object):
             LOG.debug(_("Powered on the VM instance"), instance=instance)
         #_power_on_vm()
 
-        ddstate = ""
-        ddaction = ""
-        ddtotalsteps = 0
-        ddstepnumber = 0
-        ddstepname = ""
+
+
 
         #return
         ddstatestring = "PENDING_ADD"
@@ -688,7 +507,7 @@ class VMwareVMOps(object):
         ddstatestring = "NORMAL"
         self._wait_for_task(instance, ddstatestring)
 
-
+        self._power_on(instance)
 
 
         #self._session._wait_for_task(instance['uuid'], _spawnwatch())
@@ -1353,6 +1172,36 @@ class VMwareVMOps(object):
                                         "PowerOnVM_Task", vm_ref)
             self._session._wait_for_task(instance['uuid'], poweron_task)
             LOG.debug(_("Powered on the VM"), instance=instance)
+
+    def fetchPrivateIpForInstance(self, dd_uuid):
+
+        LOG.info("Fetching stackdisplay_name: %s with stackuuid: %s" % (stackdisplay_name, stackuuid))
+        self._host_ip = CONF.ddcloudapi_host_ip
+        host_username = CONF.ddcloudapi_host_username
+        host_password = CONF.ddcloudapi_host_password
+        api_retry_count = CONF.ddcloudapi_api_retry_count
+        ddservermethodurl = ("https://%s/%s/%s/serverWithState?" % ( CONF.ddcloudapi_host_ip, CONF.ddcloudapi_apistring, CONF.ddcloudapi_orgid))
+        s = requests.Session()
+        response = s.get(ddservermethodurl, auth=(host_username , host_password ))
+        #print response.content
+
+        # Namespace stuff
+        DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
+        #DD_NAMESPACE = "http://oec.api.opsource.net/schemas/network"
+        #DD_NAMESPACE = ""
+        NS = "{%s}" % DD_NAMESPACE
+
+
+        # XML Parse Stuff
+        root = objectify.fromstring(response.content)
+        servers  = root.findall("//%sserverWithState" % NS ) # find all the groups
+
+        for server in servers:
+            if server.attrib['id'] == dd_uuid:
+                return server.privateIp
+
+        return None
+
 
     def fetchCcUuid(self, stackdisplay_name,stackuuid):
         LOG.info("Fetching stackdisplay_name: %s with stackuuid: %s" % (stackdisplay_name, stackuuid))
