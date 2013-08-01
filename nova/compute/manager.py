@@ -992,17 +992,18 @@ class ComputeManager(manager.SchedulerDependentManager):
 
                 network_info = requested_networks
 
+
+
+                #network_info = None
+                #dd_ip_address = instance['access_ip_v4']
+                #LOG.warning('COMPUTE/MANAGER.PY HAS PRIVATEIP: %s' % dd_ip_address)
+
+                network_info = self._allocate_network(context, instance, requested_networks, macs, security_groups)
+
                 instance = self._spawn(context, instance, image_meta,
                                        network_info, block_device_info,
                                        injected_files, admin_password,
                                        set_access_ip=set_access_ip)
-
-		network_info = None
-
-                dd_ip_address = instance['access_ip_v4']
-                #LOG.warning('COMPUTE/MANAGER.PY HAS PRIVATEIP: %s' % dd_ip_address)
-
-		network_info = self._allocate_network(context, instance, requested_networks, macs, security_groups)
 
                 #network_info = self._allocate_network_with_ip(context, instance,
                 #        requested_networks, macs, security_groups, dd_ip_address)
