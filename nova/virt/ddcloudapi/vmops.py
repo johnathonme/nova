@@ -286,6 +286,7 @@ class VMwareVMOps(object):
 
         LOG.debug('SPAWNING: %s %s %s %s %s' % (context, instance, image_meta, network_info, block_device_info))
         LOG.debug('SPAWNING NETWORK_INFO:  %s' % vars(network_info))
+        LOG.debug('SPAWNING NETWORK_INFO JSON:  %s' % network_info['json'])
         #LOG.warning('SPAWNING NETWORK_INFO fixed_ips: %s' % network_info[0]['info']['ips'])
         LOG.warning('SPAWNING Network Label:  %s'  % network_info[0]["network"]["label"])
         LOG.warning('SPAWNING IMAGE_REF: %s' % instance['image_ref'])
@@ -459,7 +460,7 @@ class VMwareVMOps(object):
             if response.status_code == 200:
                 LOG.info('Request to DD Cloudocontol a SUCCESS - fetching privateIp')
                 cc_uuid = self.fetchCcUuid(instance['display_name'],instance['uuid'], instance)
-                privateip = self.fetchPrivateIpForInstance(cc_uuid)
+                privateip = self.fetchPrivateIpForInstance(cc_uuid, instance)
                 LOG.info('Request to DD Cloudocontol a SUCCESS - privateIp: %s' % privateip)
 
 
@@ -1191,7 +1192,7 @@ class VMwareVMOps(object):
             self._session._wait_for_task(instance['uuid'], poweron_task)
             LOG.debug(_("Powered on the VM"), instance=instance)
 
-    def fetchPrivateIpForInstance(self, dd_uuid):
+    def fetchPrivateIpForInstance(self, dd_uuid, instance):
 
         #LOG.info("Fetching stackdisplay_name: %s with stackuuid: %s" % (stackdisplay_name, stackuuid))
         #self._host_ip = CONF.ddcloudapi_host_ip
