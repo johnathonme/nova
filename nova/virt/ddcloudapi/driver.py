@@ -728,12 +728,11 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
         self.read_only = read_only
 
         #self._conn = property(self._get_connection)
-        """
         self.firewall_driver = firewall.load_driver(
             DEFAULT_FIREWALL_DRIVER,
             self.virtapi,
             get_connection=self._get_connection)
-        """
+
         #vif_class = importutils.import_class(CONF.ddcloudapi_vif_driver)
         #self.vif_driver = vif_class(self._get_connection)
            
