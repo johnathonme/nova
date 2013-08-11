@@ -168,6 +168,125 @@ ddcloudapi_opts = [
 CONF = cfg.CONF
 CONF.register_opts(ddcloudapi_opts)
 
+libvirt_opts = [
+    cfg.StrOpt('rescue_image_id',
+               default=None,
+               help='Rescue ami image'),
+    cfg.StrOpt('rescue_kernel_id',
+               default=None,
+               help='Rescue aki image'),
+    cfg.StrOpt('rescue_ramdisk_id',
+               default=None,
+               help='Rescue ari image'),
+    cfg.StrOpt('libvirt_type',
+               default='qemu',
+               help='Libvirt domain type (valid options are: '
+                    'kvm, lxc, qemu, uml, xen)'),
+    cfg.StrOpt('libvirt_uri',
+               default='',
+               help='Override the default libvirt URI '
+                    '(which is dependent on libvirt_type)'),
+    cfg.BoolOpt('libvirt_inject_password',
+                default=False,
+                help='Inject the admin password at boot time, '
+                     'without an agent.'),
+    cfg.BoolOpt('libvirt_inject_key',
+                default=True,
+                help='Inject the ssh public key at boot time'),
+    cfg.IntOpt('libvirt_inject_partition',
+                default=1,
+                help='The partition to inject to : '
+                     '-2 => disable, -1 => inspect (libguestfs only), '
+                     '0 => not partitioned, >0 => partition number'),
+    cfg.BoolOpt('use_usb_tablet',
+                default=True,
+                help='Sync virtual and real mouse cursors in Windows VMs'),
+    cfg.StrOpt('live_migration_uri',
+               default="qemu+tcp://%s/system",
+               help='Migration target URI '
+                    '(any included "%s" is replaced with '
+                    'the migration target hostname)'),
+    cfg.StrOpt('live_migration_flag',
+               default='VIR_MIGRATE_UNDEFINE_SOURCE, VIR_MIGRATE_PEER2PEER',
+               help='Migration flags to be set for live migration'),
+    cfg.StrOpt('block_migration_flag',
+               default='VIR_MIGRATE_UNDEFINE_SOURCE, VIR_MIGRATE_PEER2PEER, '
+                       'VIR_MIGRATE_NON_SHARED_INC',
+               help='Migration flags to be set for block migration'),
+    cfg.IntOpt('live_migration_bandwidth',
+               default=0,
+               help='Maximum bandwidth to be used during migration, in Mbps'),
+    cfg.StrOpt('snapshot_image_format',
+               default=None,
+               help='Snapshot image format (valid options are : '
+                    'raw, qcow2, vmdk, vdi). '
+                    'Defaults to same as source image'),
+    cfg.StrOpt('libvirt_vif_driver',
+               default='nova.virt.libvirt.vif.LibvirtGenericVIFDriver',
+               help='The libvirt VIF driver to configure the VIFs.'),
+    cfg.ListOpt('libvirt_volume_drivers',
+                default=[
+                  'iscsi=nova.virt.libvirt.volume.LibvirtISCSIVolumeDriver',
+                  'local=nova.virt.libvirt.volume.LibvirtVolumeDriver',
+                  'fake=nova.virt.libvirt.volume.LibvirtFakeVolumeDriver',
+                  'rbd=nova.virt.libvirt.volume.LibvirtNetVolumeDriver',
+                  'sheepdog=nova.virt.libvirt.volume.LibvirtNetVolumeDriver',
+                  'nfs=nova.virt.libvirt.volume.LibvirtNFSVolumeDriver',
+                  'aoe=nova.virt.libvirt.volume.LibvirtAOEVolumeDriver',
+                  'glusterfs='
+                      'nova.virt.libvirt.volume.LibvirtGlusterfsVolumeDriver',
+                  'fibre_channel=nova.virt.libvirt.volume.'
+                      'LibvirtFibreChannelVolumeDriver',
+                  'scality='
+                      'nova.virt.libvirt.volume.LibvirtScalityVolumeDriver',
+                  ],
+                help='Libvirt handlers for remote volumes.'),
+    cfg.StrOpt('libvirt_disk_prefix',
+               default=None,
+               help='Override the default disk prefix for the devices attached'
+                    ' to a server, which is dependent on libvirt_type. '
+                    '(valid options are: sd, xvd, uvd, vd)'),
+    cfg.IntOpt('libvirt_wait_soft_reboot_seconds',
+               default=120,
+               help='Number of seconds to wait for instance to shut down after'
+                    ' soft reboot request is made. We fall back to hard reboot'
+                    ' if instance does not shutdown within this window.'),
+    cfg.BoolOpt('libvirt_nonblocking',
+                default=True,
+                help='Use a separated OS thread pool to realize non-blocking'
+                     ' libvirt calls'),
+    cfg.StrOpt('libvirt_cpu_mode',
+               default=None,
+               help='Set to "host-model" to clone the host CPU feature flags; '
+                    'to "host-passthrough" to use the host CPU model exactly; '
+                    'to "custom" to use a named CPU model; '
+                    'to "none" to not set any CPU model. '
+                    'If libvirt_type="kvm|qemu", it will default to '
+                    '"host-model", otherwise it will default to "none"'),
+    cfg.StrOpt('libvirt_cpu_model',
+               default=None,
+               help='Set to a named libvirt CPU model (see names listed '
+                    'in /usr/share/libvirt/cpu_map.xml). Only has effect if '
+                    'libvirt_cpu_mode="custom" and libvirt_type="kvm|qemu"'),
+    cfg.StrOpt('libvirt_snapshots_directory',
+               default='$instances_path/snapshots',
+               help='Location where libvirt driver will store snapshots '
+                    'before uploading them to image service'),
+    cfg.StrOpt('xen_hvmloader_path',
+                default='/usr/lib/xen/boot/hvmloader',
+                help='Location where the Xen hvmloader is kept'),
+    cfg.ListOpt('disk_cachemodes',
+                 default=[],
+                 help='Specific cachemodes to use for different disk types '
+                      'e.g: ["file=directsync","block=none"]'),
+    cfg.StrOpt('vcpu_pin_set',
+                default=None,
+                help='Which pcpus can be used by vcpus of instance '
+                     'e.g: "4-12,^8,15"'),
+    ]
+
+CONF.register_opts(libvirt_opts)
+
 TIME_BETWEEN_API_CALL_RETRIES = 2.0
 
 CONF.import_opt('host', 'nova.netconf')
@@ -529,6 +648,7 @@ class VMwareVCDriver(VMwareESXDriver):
                                         self._volumeops, self._cluster)
         self._vc_state = None
 
+
     @property
     def host_state(self):
         if not self._vc_state:
@@ -606,6 +726,8 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
         self._caps = None
         self._vcpu_total = 0
         self.read_only = read_only
+
+        #self._conn = property(self._get_connection)
         
         self.firewall_driver = firewall.load_driver(
             DEFAULT_FIREWALL_DRIVER,
@@ -823,7 +945,7 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
                              self.uri())
         return wrapped_conn
 
-    #_conn = property(_get_connection)
+    _conn = property(_get_connection)
 
     
 
