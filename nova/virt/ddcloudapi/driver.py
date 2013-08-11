@@ -777,6 +777,7 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
         return
         import sys
         sys.exit()
+        # early exit
         #super(CloudcontrolapiDriver, self).__init__(virtapi)
         self._cluster_name = CONF.ddcloudapi_cluster_name
         if not self._cluster_name:
