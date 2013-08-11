@@ -1131,6 +1131,7 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
     def plug_vifs(self, instance, network_info):
         """Plug VIFs into networks."""
         #self._vmops.plug_vifs(instance, network_info)
+        LOG.warning(vars(network_info))
         for (network, mapping) in network_info:
             self.vif_driver.plug(instance, (network, mapping))
 
