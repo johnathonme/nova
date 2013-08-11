@@ -1,4 +1,4 @@
-"""XX
+"""
 A connection to the Cloudcontrolapi platform.
 
 **Related Flags**
@@ -88,7 +88,7 @@ from nova.virt.ddcloudapi import vim
 from nova.virt.ddcloudapi import vim_util
 from nova.virt.ddcloudapi import error_util
 from nova.virt.ddcloudapi import host
-from nova.virt.ddcloudapi import vmops
+#from nova.virt.ddcloudapi import vmops
 from nova.virt.ddcloudapi import volumeops
 from nova.virt.ddcloudapi import firewall as libvirt_firewall
 from nova.virt.ddcloudapi import config as vconfig
