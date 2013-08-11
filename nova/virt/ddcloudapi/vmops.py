@@ -53,7 +53,7 @@ from nova import context
 from nova.openstack.common import excutils
 from nova.openstack.common import log as logging
 from nova.virt import driver
-from nova.virt.ddcloudapi import vif as vmwarevif
+from nova.virt.ddcloudapi import vmwarevif as vmwarevif
 from nova.virt.ddcloudapi import vim_util
 from nova.virt.ddcloudapi import vm_util
 from nova.virt.ddcloudapi import vmware_images
@@ -72,7 +72,7 @@ vmware_group = cfg.OptGroup(name='vmware',
 CONF = cfg.CONF
 CONF.register_group(vmware_group)
 CONF.register_opts(vmware_vif_opts, vmware_group)
-CONF.import_opt('base_dir_name', 'nova.virt.libvirt.imagecache')
+CONF.import_opt('base_dir_name', 'nova.virt.ddcloudapi.imagecache')
 CONF.import_opt('vnc_enabled', 'nova.vnc')
 
 LOG = logging.getLogger(__name__)
@@ -295,7 +295,8 @@ class VMwareVMOps(object):
         apihostname, apiver, ddorgid, targetid, ddusername, ddpassword, location = self.ddpreconnect_withinstance(instance)
 
         # Preping needed variables
-        ccnetworkid = self.fetchNetworkid(network_info[0]["network"]["label"])
+        #ccnetworkid = self.fetchNetworkid(network_info[0]["network"]["label"])
+        ccnetworkid = "48367324-a8da-11e2-96ef-000af700e018"
         cctenantid = "e2c43389-90de-4498-b7d0-056e8db0b381"
         #ccimageid = self.fetchImageid('Ubuntu 12.04 2 CPU','AP1')
         #ccimageid = "65cf01aa-dfe2-11e2-a7c0-000af700e018"
@@ -457,7 +458,7 @@ class VMwareVMOps(object):
 
             if response.status_code == 200:
                 LOG.info('Request to DD Cloudocontol a SUCCESS - fetching privateIp')
-                cc_uuid = self.fetchCcUuid(instance['display_name'],instance['uuid'])
+                cc_uuid = self.fetchCcUuid(instance['display_name'],instance['uuid'], instance)
                 privateip = self.fetchPrivateIpForInstance(cc_uuid)
                 LOG.info('Request to DD Cloudocontol a SUCCESS - privateIp: %s' % privateip)
 
@@ -788,6 +789,7 @@ class VMwareVMOps(object):
 
 
     def ddpreconnect_withinstance(self, instance):
+        LOG.debug("ddpreconnect_withinstance: %s" % instance['display_name'])
         host = instance['host']
         az_name = instance['availability_zone']
         project_id = instance['project_id']
@@ -799,7 +801,7 @@ class VMwareVMOps(object):
         location = ""
         apihostname = ""
         geo = ""
-        targetid = self.fetchCcUuid(instance['display_name'],instance['uuid'])
+        targetid = self.fetchCcUuid(instance['display_name'],instance['uuid'],instance)
 
         # Fetch AZ and AGG details from nova
         ctxt = context.get_admin_context()
@@ -1219,16 +1221,65 @@ class VMwareVMOps(object):
         return None
 
 
-    def fetchCcUuid(self, stackdisplay_name, stackuuid):
+    def fetchCcUuid(self, stackdisplay_name, stackuuid, instance):
         LOG.info("Fetching stackdisplay_name: %s with stackuuid: %s" % (stackdisplay_name, stackuuid))
         self._host_ip = CONF.ddcloudapi_host_ip
         host_username = CONF.ddcloudapi_host_username
         host_password = CONF.ddcloudapi_host_password
         api_retry_count = CONF.ddcloudapi_api_retry_count
-        ddservermethodurl = ("https://%s/%s/%s/serverWithState?" % ( CONF.ddcloudapi_host_ip, CONF.ddcloudapi_apistring, CONF.ddcloudapi_orgid))
+
+
+
+        LOG.debug("ddpreconnect_withinstance: %s" % instance['display_name'])
+        host = instance['host']
+        az_name = instance['availability_zone']
+        project_id = instance['project_id']
+        ddorgid = ""
+        ddorgname = ""
+        ddusername = ""
+        ddpassword = ""
+        apiver = ""
+        location = ""
+        apihostname = ""
+        geo = ""
+
+        # Fetch AZ and AGG details from nova
+        ctxt = context.get_admin_context()
+        aggregates = self._virtapi.aggregate_get_by_host(
+                        ctxt, host, key=None)
+        #LOG.debug('AGGREGATES FOR THIS HOST: %s' % aggregates)
+
+        for agg in aggregates:
+            meta = agg['metadetails']
+            #print('%s:%s' % (agg['name'],meta['filter_tenant_id']))
+            try:
+                if (project_id == meta['filter_tenant_id'] and instance['availability_zone'] == meta['availability_zone']):
+                    ddorgid = meta['ddorgid']
+                    ddorgname = meta['ddorgname']
+                    ddusername = meta['ddusername']
+                    ddpassword = meta['ddpassword']
+                    apiver = meta['apiver']
+                    location = meta['location']
+                    apihostname = meta['apihostname']
+                    geo = meta['geo']
+            except:
+                 continue
+
+
+        # Exception if we got nothing
+        if not aggregates:
+                        msg = ('Aggregate for host %(host)s count not be'
+                                ' found.') % dict(host=host)
+                        raise exception.NotFound(msg)
+
+
+        #ddservermethodurl = ("https://%s/%s/%s/serverWithState?" % ( CONF.ddcloudapi_host_ip, CONF.ddcloudapi_apistring, CONF.ddcloudapi_orgid))
+        #s = requests.Session()
+        #response = s.get(ddservermethodurl, auth=(host_username , host_password ))
+        host_url = str('https://%s/oec/%s/%s/serverWithState?' % (apihostname,apiver,ddorgid))
         s = requests.Session()
-        response = s.get(ddservermethodurl, auth=(host_username , host_password ))
-        #print response.content
+        response = s.get(host_url, auth=(ddusername , ddpassword ))
+        print response.content
 
         # Namespace stuff
         DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
@@ -1257,7 +1308,7 @@ class VMwareVMOps(object):
         host_username = CONF.ddcloudapi_host_username
         host_password = CONF.ddcloudapi_host_password
         api_retry_count = CONF.ddcloudapi_api_retry_count
-        ccuid = self.fetchCcUuid(instance['display_name'],instance['uuid'])
+        ccuid = self.fetchCcUuid(instance['display_name'],instance['uuid'],instance)
 
         # Johnathon Test
         LOG.info("Powering On Server: %s - %s" % (instance['display_name'],instance['uuid']))

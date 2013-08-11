@@ -20,7 +20,7 @@
 :mod:`ddcloudapi` -- Nova support for Dimension Data CaaS through Control Open REST API.
 """
 
-#from ddcloudapi import driver
-from driver import CloudcontrolapiDriver
+from nova.virt.ddcloudapi import driver
+#from driver import CloudcontrolapiDriver
 
-#CloudcontrolapiDriver = driver.CloudcontrolapiDriver
+CloudcontrolapiDriver = driver.CloudcontrolapiDriver

@@ -18,17 +18,70 @@ A connection to the Cloudcontrolapi platform.
 :vnc_password:              VNC password
 :use_linked_clone:          Whether to use linked clone (default: True)
 """
-
+# Libvirt imports
+import errno
+import eventlet
+import functools
+import glob
+import os
+import shutil
+import socket
+import sys
+import tempfile
+import threading
 import time
 import uuid
 
-from eventlet import event
+from eventlet import greenio
+from eventlet import greenthread
+from eventlet import patcher
+from eventlet import tpool
+from eventlet import util as eventlet_util
+from lxml import etree
 from oslo.config import cfg
+from xml.dom import minidom
+
+from nova.api.metadata import base as instance_metadata
+from nova import block_device
+from nova.compute import flavors
+from nova.compute import power_state
+from nova.compute import task_states
+from nova.compute import vm_mode
+from nova import context as nova_context
 from nova import exception
+from nova.image import glance
+from nova.openstack.common import excutils
+from nova.openstack.common import fileutils
+from nova.openstack.common import importutils
 from nova.openstack.common import jsonutils
 from nova.openstack.common import log as logging
 from nova.openstack.common import loopingcall
+from nova.openstack.common.notifier import api as notifier
+from nova.openstack.common import processutils
+from nova import utils
+from nova import version
+from nova.virt import configdrive
+from nova.virt.disk import api as disk
 from nova.virt import driver
+from nova.virt import event as virtevent
+from nova.virt import firewall
+from nova.virt import netutils
+
+native_threading = patcher.original("threading")
+native_Queue = patcher.original("Queue")
+# DDCloudAPI Imports
+#import time
+#import uuid
+from eventlet import event
+#from oslo.config import cfg
+#from nova import exception
+#from nova.openstack.common import jsonutils
+#from nova.openstack.common import log as logging
+#from nova.openstack.common import loopingcall
+#from nova.virt import driver
+#from nova.openstack.common import excutils
+#from nova.openstack.common import fileutils
+#from nova.openstack.common import importutils
 
 from nova.virt.ddcloudapi import vm_util
 from nova.virt.ddcloudapi import vim
@@ -37,14 +90,22 @@ from nova.virt.ddcloudapi import error_util
 from nova.virt.ddcloudapi import host
 from nova.virt.ddcloudapi import vmops
 from nova.virt.ddcloudapi import volumeops
+from nova.virt.ddcloudapi import firewall as libvirt_firewall
+from nova.virt.ddcloudapi import config as vconfig
+from nova.virt.ddcloudapi import utils as libvirt_utils
+from nova.virt.ddcloudapi import blockinfo
+from nova.virt.ddcloudapi import imagebackend
+from nova.virt.ddcloudapi import imagecache
 import dd_session
-import requests
+#import requests
 
 
 LOG = logging.getLogger(__name__)
 #logging.debug('ddcloudapi: A debug message!')
 
 _db_content = {}
+
+libvirt = None
 
 ddcloudapi_opts = [
     cfg.StrOpt('ddcloudapi_host_ip',
@@ -86,6 +147,9 @@ ddcloudapi_opts = [
     cfg.StrOpt('ddcloudapi_orgid',
                 default = None,
                 help='DD Cloud client Org Id, helper value during dev'),
+    cfg.StrOpt('ddcloudapi_vif_driver',
+               default='nova.virt.ddcloudapi.vif.LibvirtGenericVIFDriver',
+               help='The ddcloudapiVIF driver to configure the VIFs.'),
     cfg.IntOpt('vnc_port',
                default=5900,
                help='VNC starting port'),
@@ -105,6 +169,82 @@ CONF = cfg.CONF
 CONF.register_opts(ddcloudapi_opts)
 
 TIME_BETWEEN_API_CALL_RETRIES = 2.0
+
+CONF.import_opt('host', 'nova.netconf')
+CONF.import_opt('my_ip', 'nova.netconf')
+CONF.import_opt('default_ephemeral_format', 'nova.virt.driver')
+CONF.import_opt('use_cow_images', 'nova.virt.driver')
+CONF.import_opt('live_migration_retry_count', 'nova.compute.manager')
+CONF.import_opt('vncserver_proxyclient_address', 'nova.vnc')
+CONF.import_opt('server_proxyclient_address', 'nova.spice', group='spice')
+
+DEFAULT_FIREWALL_DRIVER = "%s.%s" % (
+    libvirt_firewall.__name__,
+    libvirt_firewall.IptablesFirewallDriver.__name__)
+
+MAX_CONSOLE_BYTES = 102400
+
+
+def patch_tpool_proxy():
+    """eventlet.tpool.Proxy doesn't work with old-style class in __str__()
+    or __repr__() calls. See bug #962840 for details.
+    We perform a monkey patch to replace those two instance methods.
+    """
+    def str_method(self):
+        return str(self._obj)
+
+    def repr_method(self):
+        return repr(self._obj)
+
+    tpool.Proxy.__str__ = str_method
+    tpool.Proxy.__repr__ = repr_method
+
+
+patch_tpool_proxy()
+
+VIR_DOMAIN_NOSTATE = 0
+VIR_DOMAIN_RUNNING = 1
+VIR_DOMAIN_BLOCKED = 2
+VIR_DOMAIN_PAUSED = 3
+VIR_DOMAIN_SHUTDOWN = 4
+VIR_DOMAIN_SHUTOFF = 5
+VIR_DOMAIN_CRASHED = 6
+VIR_DOMAIN_PMSUSPENDED = 7
+
+LIBVIRT_POWER_STATE = {
+    VIR_DOMAIN_NOSTATE: power_state.NOSTATE,
+    VIR_DOMAIN_RUNNING: power_state.RUNNING,
+    # NOTE(maoy): The DOMAIN_BLOCKED state is only valid in Xen.
+    # It means that the VM is running and the vCPU is idle. So,
+    # we map it to RUNNING
+    VIR_DOMAIN_BLOCKED: power_state.RUNNING,
+    VIR_DOMAIN_PAUSED: power_state.PAUSED,
+    # NOTE(maoy): The libvirt API doc says that DOMAIN_SHUTDOWN
+    # means the domain is being shut down. So technically the domain
+    # is still running. SHUTOFF is the real powered off state.
+    # But we will map both to SHUTDOWN anyway.
+    # http://libvirt.org/html/libvirt-libvirt.html
+    VIR_DOMAIN_SHUTDOWN: power_state.SHUTDOWN,
+    VIR_DOMAIN_SHUTOFF: power_state.SHUTDOWN,
+    VIR_DOMAIN_CRASHED: power_state.CRASHED,
+    VIR_DOMAIN_PMSUSPENDED: power_state.SUSPENDED,
+}
+
+MIN_LIBVIRT_VERSION = (0, 9, 6)
+# When the above version matches/exceeds this version
+# delete it & corresponding code using it
+MIN_LIBVIRT_HOST_CPU_VERSION = (0, 9, 10)
+MIN_LIBVIRT_CLOSE_CALLBACK_VERSION = (1, 0, 1)
+# Live snapshot requirements
+REQ_HYPERVISOR_LIVESNAPSHOT = "QEMU"
+MIN_LIBVIRT_LIVESNAPSHOT_VERSION = (1, 0, 0)
+MIN_QEMU_LIVESNAPSHOT_VERSION = (1, 3, 0)
+
+
+def libvirt_error_handler(context, err):
+    # Just ignore instead of default outputting to stderr.
+    pass
+
 
 
 class Failure(Exception):
@@ -350,11 +490,15 @@ class VMwareESXDriver(driver.ComputeDriver):
 
     def plug_vifs(self, instance, network_info):
         """Plug VIFs into networks."""
-        self._vmops.plug_vifs(instance, network_info)
+        #self._vmops.plug_vifs(instance, network_info)
+        for (network, mapping) in network_info:
+            self.vif_driver.plug(instance, (network, mapping))
 
     def unplug_vifs(self, instance, network_info):
         """Unplug VIFs from networks."""
-        self._vmops.unplug_vifs(instance, network_info)
+        #self._vmops.unplug_vifs(instance, network_info)
+        for (network, mapping) in network_info:
+            self.vif_driver.unplug(instance, (network, mapping))
 
 
 class VMwareVCDriver(VMwareESXDriver):
@@ -449,6 +593,28 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
 
     def __init__(self, virtapi, read_only=False, scheme="https"):
         super(CloudcontrolapiDriver, self).__init__(virtapi)
+        global libvirt
+        if libvirt is None:
+            libvirt = __import__('libvirt')
+        self._session = None
+        self._host_state = None
+        self._initiator = None
+        self._fc_wwnns = None
+        self._fc_wwpns = None
+        self._wrapped_conn = None
+        self._wrapped_conn_lock = threading.Lock()
+        self._caps = None
+        self._vcpu_total = 0
+        self.read_only = read_only
+        
+        self.firewall_driver = firewall.load_driver(
+            DEFAULT_FIREWALL_DRIVER,
+            self.virtapi,
+            get_connection=self._get_connection)
+           
+        #vif_class = importutils.import_class(CONF.ddcloudapi_vif_driver)
+        #self.vif_driver = vif_class(self._get_connection)
+           
 
         self._host_ip = CONF.ddcloudapi_host_ip
         host_username = CONF.ddcloudapi_host_username
@@ -456,6 +622,8 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
         api_retry_count = CONF.ddcloudapi_api_retry_count
 
         # Johnathon Test
+        """
+        import requests
         LOG.info("CloudcontrolapiDriver Routines")
         self._session = VMwareAPISession(self._host_ip,
                                          host_username, host_password,
@@ -470,7 +638,7 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
         response = thisreq.get(ddmyaccounturl, auth=(host_username, host_password))
         LOG.info("response: %s" % response.status_code)
         #response.content
-
+        """
 
         self._host = host.Host(self._session)
         self._host_state = None
@@ -531,6 +699,133 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
     def list_instances(self):
         """List VM instances."""
         return self._vmops.list_instances()
+    
+    def _lookup_by_id(self, instance_id):
+        """Retrieve libvirt domain object given an instance id.
+
+        All libvirt error handling should be handled in this method and
+        relevant nova exceptions should be raised in response.
+        """
+
+        try:
+            return self._conn.lookupByID(instance_id)
+        except libvirt.libvirtError as ex:
+            error_code = ex.get_error_code()
+            if error_code == libvirt.VIR_ERR_NO_DOMAIN:
+                raise exception.InstanceNotFound(instance_id=instance_id)
+
+            msg = (_("Error from libvirt while looking up %(instance_id)s: "
+                     "[Error Code %(error_code)s] %(ex)s")
+                   % {'instance_id': instance_id,
+                      'error_code': error_code,
+                      'ex': ex})
+            raise exception.NovaException(msg)
+
+    def _lookup_by_name(self, instance_name):
+        """Retrieve libvirt domain object given an instance name.
+
+        All libvirt error handling should be handled in this method and
+        relevant nova exceptions should be raised in response.
+        """
+
+        try:
+            return self._conn.lookupByName(instance_name)
+        except libvirt.libvirtError as ex:
+            error_code = ex.get_error_code()
+            if error_code == libvirt.VIR_ERR_NO_DOMAIN:
+                raise exception.InstanceNotFound(instance_id=instance_name)
+
+            msg = (_('Error from libvirt while looking up %(instance_name)s: '
+                     '[Error Code %(error_code)s] %(ex)s') %
+                   {'instance_name': instance_name,
+                    'error_code': error_code,
+                    'ex': ex})
+            raise exception.NovaException(msg)
+       
+    @exception.wrap_exception()
+    def attach_interface(self, instance, image_meta, network_info):
+        virt_dom = self._lookup_by_name(instance['name'])
+        for (network, mapping) in network_info:
+            self.vif_driver.plug(instance, (network, mapping))
+            self.firewall_driver.setup_basic_filtering(instance,
+                                                       [(network, mapping)])
+            cfg = self.vif_driver.get_config(instance, network, mapping,
+                                             image_meta)
+            try:
+                flags = libvirt.VIR_DOMAIN_AFFECT_CONFIG
+                state = LIBVIRT_POWER_STATE[virt_dom.info()[0]]
+                if state == power_state.RUNNING:
+                    flags |= libvirt.VIR_DOMAIN_AFFECT_LIVE
+                virt_dom.attachDeviceFlags(cfg.to_xml(), flags)
+            except libvirt.libvirtError:
+                LOG.error(_('attaching network adapter failed.'),
+                         instance=instance)
+                self.vif_driver.unplug(instance, (network, mapping))
+                raise exception.InterfaceAttachFailed(instance)
+
+    @exception.wrap_exception()
+    def detach_interface(self, instance, network_info):
+        virt_dom = self._lookup_by_name(instance['name'])
+        for (network, mapping) in network_info:
+            cfg = self.vif_driver.get_config(instance, network, mapping, None)
+            try:
+                self.vif_driver.unplug(instance, (network, mapping))
+                flags = libvirt.VIR_DOMAIN_AFFECT_CONFIG
+                state = LIBVIRT_POWER_STATE[virt_dom.info()[0]]
+                if state == power_state.RUNNING:
+                    flags |= libvirt.VIR_DOMAIN_AFFECT_LIVE
+                virt_dom.detachDeviceFlags(cfg.to_xml(), flags)
+            except libvirt.libvirtError as ex:
+                error_code = ex.get_error_code()
+                if error_code == libvirt.VIR_ERR_NO_DOMAIN:
+                    LOG.warn(_("During detach_interface, "
+                               "instance disappeared."),
+                             instance=instance)
+                else:
+                    LOG.error(_('detaching network adapter failed.'),
+                             instance=instance)
+                    raise exception.InterfaceDetachFailed(instance)
+   
+    def _get_connection(self):
+        with self._wrapped_conn_lock:
+            wrapped_conn = self._wrapped_conn
+
+        if not wrapped_conn or not self._test_connection(wrapped_conn):
+            LOG.debug(_('Connecting to libvirt: %s'), self.uri())
+            if not CONF.libvirt_nonblocking:
+                wrapped_conn = self._connect(self.uri(), self.read_only)
+            else:
+                wrapped_conn = tpool.proxy_call(
+                    (libvirt.virDomain, libvirt.virConnect),
+                    self._connect, self.uri(), self.read_only)
+            with self._wrapped_conn_lock:
+                self._wrapped_conn = wrapped_conn
+
+            try:
+                LOG.debug("Registering for lifecycle events %s" % str(self))
+                wrapped_conn.domainEventRegisterAny(
+                    None,
+                    libvirt.VIR_DOMAIN_EVENT_ID_LIFECYCLE,
+                    self._event_lifecycle_callback,
+                    self)
+            except Exception:
+                LOG.warn(_("URI %s does not support events"),
+                         self.uri())
+
+            if self.has_min_version(MIN_LIBVIRT_CLOSE_CALLBACK_VERSION):
+                try:
+                    LOG.debug("Registering for connection events: %s" %
+                              str(self))
+                    wrapped_conn.registerCloseCallback(
+                        self._close_callback, None)
+                except libvirt.libvirtError:
+                    LOG.debug(_("URI %s does not support connection events"),
+                             self.uri())
+        return wrapped_conn
+
+    #_conn = property(_get_connection)
+
+    
 
     def spawn(self, context, instance, image_meta, injected_files,
               admin_password, network_info=None, block_device_info=None):
@@ -713,11 +1008,15 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
 
     def plug_vifs(self, instance, network_info):
         """Plug VIFs into networks."""
-        self._vmops.plug_vifs(instance, network_info)
+        #self._vmops.plug_vifs(instance, network_info)
+        for (network, mapping) in network_info:
+            self.vif_driver.plug(instance, (network, mapping))
 
     def unplug_vifs(self, instance, network_info):
         """Unplug VIFs from networks."""
-        self._vmops.unplug_vifs(instance, network_info)
+        #self._vmops.unplug_vifs(instance, network_info)
+        for (network, mapping) in network_info:
+            self.vif_driver.unplug(instance, (network, mapping))
 
 
 

@@ -1,0 +1,96 @@
+# Libvirt imports
+import errno
+import eventlet
+import functools
+import glob
+import os
+import shutil
+import socket
+import sys
+import tempfile
+import threading
+import time
+import uuid
+
+from eventlet import greenio
+from eventlet import greenthread
+from eventlet import patcher
+from eventlet import tpool
+from eventlet import util as eventlet_util
+from lxml import etree
+from oslo.config import cfg
+from xml.dom import minidom
+
+from nova.api.metadata import base as instance_metadata
+from nova import block_device
+from nova.compute import flavors
+from nova.compute import power_state
+from nova.compute import task_states
+from nova.compute import vm_mode
+from nova import context as nova_context
+from nova import exception
+from nova.image import glance
+from nova.openstack.common import excutils
+from nova.openstack.common import fileutils
+from nova.openstack.common import importutils
+from nova.openstack.common import jsonutils
+from nova.openstack.common import log as logging
+from nova.openstack.common import loopingcall
+from nova.openstack.common.notifier import api as notifier
+from nova.openstack.common import processutils
+from nova import utils
+from nova import version
+from nova.virt import configdrive
+from nova.virt.disk import api as disk
+from nova.virt import driver
+from nova.virt import event as virtevent
+from nova.virt import firewall
+from nova.virt import netutils
+
+native_threading = patcher.original("threading")
+native_Queue = patcher.original("Queue")
+# DDCloudAPI Imports
+#import time
+#import uuid
+from eventlet import event
+#from oslo.config import cfg
+#from nova import exception
+#from nova.openstack.common import jsonutils
+#from nova.openstack.common import log as logging
+#from nova.openstack.common import loopingcall
+#from nova.virt import driver
+#from nova.openstack.common import excutils
+#from nova.openstack.common import fileutils
+#from nova.openstack.common import importutils
+from nova.virt.ddcloudapi import vm_util
+from nova.virt.ddcloudapi import vim
+from nova.virt.ddcloudapi import vim_util
+from nova.virt.ddcloudapi import error_util
+from nova.virt.ddcloudapi import host
+#from nova.virt.ddcloudapi import vmops
+from nova.virt.ddcloudapi import volumeops
+from nova.virt.ddcloudapi import firewall as libvirt_firewall
+from nova.virt.ddcloudapi import config as vconfig
+from nova.virt.ddcloudapi import utils as libvirt_utils
+from nova.virt.ddcloudapi import blockinfo
+from nova.virt.ddcloudapi import imagebackend
+from nova.virt.ddcloudapi import imagecache
+
+LOG = logging.getLogger(__name__)
+#logging.debug('ddcloudapi: A debug message!')
+
+_db_content = {}
+
+libvirt = None
+
+
+
+class CloudcontrolapiDriver(driver.ComputeDriver):
+    """The Cloudontrol host connection object."""
+
+    def __init__(self, virtapi, read_only=False, scheme="https"):
+        super(CloudcontrolapiDriver, self).__init__(virtapi)
+
+
+
+

@@ -189,7 +189,7 @@ class Vim:
         print("YAHOOOOOOO")
         """
 
-        import dd_session as ddsession
+        #import dd_session as ddsession
         #mysession = ddsession.DDsession()
 
         #print mysession
@@ -201,21 +201,7 @@ class Vim:
         #time.sleep( 15 )
         sys.exit()
 
-        import httplib2
-        http = httplib2.Http('.cache')
-        http.add_credentials(host_username, host_password)
-        response, content = http.request(host_url)
-        print("response: %s" % response)
-        print("content:  %s" % content)
-
-        from xml.etree import ElementTree
-        doc = ElementTree.fromstring(content)
-
-        try:
-            import xml.etree.cElementTree as ET
-        except ImportError:
-            import xml.etree.ElementTree as ET
-
+        """
         ET.register_namespace('', 'http://oec.api.opsource.net/schemas/server')
         ET.register_namespace('', 'http://oec.api.opsource.net/schemas/directory')
         ET.register_namespace('', 'http://oec.api.opsource.net/schemas/organization')
@@ -230,7 +216,6 @@ class Vim:
         ET.register_namespace('', 'http://oec.api.opsource.net/schemas/support')
         ET.register_namespace('', 'http://oec.api.opsource.net/schemas/storage')
         ET.register_namespace('', 'http://oec.api.opsource.net/schemas/manualimport')
-
         import re
         content = re.sub(' xmlns="[^"]+"', '', content, count=1)
         #ET.register_namespace('', 'http://oec.api.opsource.net/schemas/server')
@@ -262,37 +247,13 @@ class Vim:
             #print ("%s" % server2.tag )
 
         #serverWithState
-        from elements import Element
-        class Example(Element):
-                _tag = 'Example'
-
-                version = TextAttribute()
-
-                hacker = BoolElement(tag="Hacker")
-                name = TextElement(name="Name")
-                age = IntegerElement(name="Age")
-
-
-        class Parameter(Element):
-              _tag = 'serverWithState'
-              _attributes = Element._attributes.copy()
-
-              _attributes['id'] = 'id'
-              _attributes['location'] = 'location'
-
-              def __init__(self, id=None, location=None):
-                self.id = id
-                self.location = location
-
-        e = Parameter()
-        e.from_string(content)
-        print e
 
         import sys
         import time
         #time.sleep( 15 )
         sys.exit()
         self.client = doc
+        """
 
 
     @staticmethod
