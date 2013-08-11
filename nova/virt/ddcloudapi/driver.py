@@ -733,8 +733,8 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
             self.virtapi,
             get_connection=self._get_connection)
 
-        #vif_class = importutils.import_class(CONF.ddcloudapi_vif_driver)
-        #self.vif_driver = vif_class(self._get_connection)
+        vif_class = importutils.import_class(CONF.ddcloudapi_vif_driver)
+        self.vif_driver = vif_class(self._get_connection)
            
 
         self._host_ip = CONF.ddcloudapi_host_ip
