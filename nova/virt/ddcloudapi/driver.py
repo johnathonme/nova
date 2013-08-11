@@ -946,6 +946,7 @@ class CloudcontrolapiDriver(driver.ComputeDriver):
         return wrapped_conn
 
     #_conn = property(_get_connection)
+    #blah
 
     
 
