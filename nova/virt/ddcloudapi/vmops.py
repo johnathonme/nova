@@ -1194,14 +1194,62 @@ class VMwareVMOps(object):
     def fetchPrivateIpForInstance(self, dd_uuid):
 
         #LOG.info("Fetching stackdisplay_name: %s with stackuuid: %s" % (stackdisplay_name, stackuuid))
-        self._host_ip = CONF.ddcloudapi_host_ip
-        host_username = CONF.ddcloudapi_host_username
-        host_password = CONF.ddcloudapi_host_password
-        api_retry_count = CONF.ddcloudapi_api_retry_count
-        ddservermethodurl = ("https://%s/%s/%s/serverWithState?" % ( CONF.ddcloudapi_host_ip, CONF.ddcloudapi_apistring, CONF.ddcloudapi_orgid))
+        #self._host_ip = CONF.ddcloudapi_host_ip
+        #host_username = CONF.ddcloudapi_host_username
+        #host_password = CONF.ddcloudapi_host_password
+        #api_retry_count = CONF.ddcloudapi_api_retry_count
+        #ddservermethodurl = ("https://%s/%s/%s/serverWithState?" % ( CONF.ddcloudapi_host_ip, CONF.ddcloudapi_apistring, CONF.ddcloudapi_orgid))
+
+
+        LOG.debug("ddpreconnect_withinstance: %s" % instance['display_name'])
+        host = instance['host']
+        az_name = instance['availability_zone']
+        project_id = instance['project_id']
+        ddorgid = ""
+        ddorgname = ""
+        ddusername = ""
+        ddpassword = ""
+        apiver = ""
+        location = ""
+        apihostname = ""
+        geo = ""
+
+        # Fetch AZ and AGG details from nova
+        ctxt = context.get_admin_context()
+        aggregates = self._virtapi.aggregate_get_by_host(
+                        ctxt, host, key=None)
+        #LOG.debug('AGGREGATES FOR THIS HOST: %s' % aggregates)
+
+        for agg in aggregates:
+            meta = agg['metadetails']
+            #print('%s:%s' % (agg['name'],meta['filter_tenant_id']))
+            try:
+                if (project_id == meta['filter_tenant_id'] and instance['availability_zone'] == meta['availability_zone']):
+                    ddorgid = meta['ddorgid']
+                    ddorgname = meta['ddorgname']
+                    ddusername = meta['ddusername']
+                    ddpassword = meta['ddpassword']
+                    apiver = meta['apiver']
+                    location = meta['location']
+                    apihostname = meta['apihostname']
+                    geo = meta['geo']
+            except:
+                 continue
+
+
+        # Exception if we got nothing
+        if not aggregates:
+                        msg = ('Aggregate for host %(host)s count not be'
+                                ' found.') % dict(host=host)
+                        raise exception.NotFound(msg)
+
+
+
+        host_url = str('https://%s/oec/%s/%s/serverWithState?' % (apihostname,apiver,ddorgid))
         s = requests.Session()
-        response = s.get(ddservermethodurl, auth=(host_username , host_password ))
+        response = s.get(host_url, auth=(ddusername , ddpassword ))
         #print response.content
+
 
         # Namespace stuff
         DD_NAMESPACE = "http://oec.api.opsource.net/schemas/server"
