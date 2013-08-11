@@ -286,7 +286,7 @@ class VMwareVMOps(object):
 
         LOG.debug('SPAWNING: %s %s %s %s %s' % (context, instance, image_meta, network_info, block_device_info))
         LOG.debug('SPAWNING NETWORK_INFO:  %s' % vars(network_info))
-        LOG.debug('SPAWNING NETWORK_INFO JSON:  %s' % network_info['json'])
+        LOG.debug('SPAWNING NETWORK_INFO JSON:  %s' % network_info[0]['json'])
         #LOG.warning('SPAWNING NETWORK_INFO fixed_ips: %s' % network_info[0]['info']['ips'])
         LOG.warning('SPAWNING Network Label:  %s'  % network_info[0]["network"]["label"])
         LOG.warning('SPAWNING IMAGE_REF: %s' % instance['image_ref'])
